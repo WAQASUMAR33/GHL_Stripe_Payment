@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model GhlConnection {
+  id               String            @id @default(cuid())
+  locationId       String            @unique @map("location_id")
+  companyId        String?           @map("company_id")
+  userId           String?           @map("user_id")
+  accessToken      String            @map("access_token") @db.Text
+  refreshToken     String            @map("refresh_token") @db.Text
+  expiresAt        DateTime          @map("expires_at")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  paymentEvents    PaymentEvent[]
+  stripeConnection StripeConnection?
+  webhookLogs      WebhookLog[]
+
+  @@map("ghl_connections")
+}
+
+model StripeConnection {
+  id              String         @id @default(cuid())
+  locationId      String         @unique @map("location_id")
+  stripeAccountId String         @unique @map("stripe_account_id")
+  accessToken     String         @map("access_token") @db.Text
+  refreshToken    String?        @map("refresh_token") @db.Text
+  publishableKey  String         @map("publishable_key")
+  livemode        Boolean        @default(false)
+  tokenType       String?        @map("token_type")
+  scope           String?
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  paymentEvents   PaymentEvent[]
+  ghlConnection   GhlConnection  @relation(fields: [locationId], references: [locationId], onDelete: Cascade)
+
+  @@map("stripe_connections")
+}
+
+model PaymentEvent {
+  id               String           @id @default(cuid())
+  locationId       String           @map("location_id")
+  stripeAccountId  String           @map("stripe_account_id")
+  paymentIntentId  String           @map("payment_intent_id")
+  entityId         String?          @map("entity_id")
+  entityType       String?          @map("entity_type")
+  amount           Int
+  currency         String           @default("usd")
+  status           PaymentStatus
+  failureReason    String?          @map("failure_reason") @db.Text
+  refundedAmount   Int              @default(0) @map("refunded_amount")
+  metadata         String?          @db.LongText
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  ghlConnection    GhlConnection    @relation(fields: [locationId], references: [locationId])
+  stripeConnection StripeConnection @relation(fields: [stripeAccountId], references: [stripeAccountId])
+
+  @@index([locationId])
+  @@index([paymentIntentId])
+  @@index([status])
+  @@index([stripeAccountId], map: "payment_events_stripe_account_id_fkey")
+  @@map("payment_events")
+}
+
+model WebhookLog {
+  id            String         @id @default(cuid())
+  source        WebhookSource
+  eventId       String         @unique @map("event_id")
+  eventType     String         @map("event_type")
+  locationId    String?        @map("location_id")
+  payload       String         @db.LongText
+  status        WebhookStatus  @default(PENDING)
+  error         String?        @db.Text
+  processedAt   DateTime?      @map("processed_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  ghlConnection GhlConnection? @relation(fields: [locationId], references: [locationId])
+
+  @@index([source, eventType])
+  @@index([locationId])
+  @@map("webhook_logs")
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum WebhookSource {
+  STRIPE
+  GHL
+}
+
+enum WebhookStatus {
+  PENDING
+  PROCESSED
+  FAILED
+  SKIPPED
+}
