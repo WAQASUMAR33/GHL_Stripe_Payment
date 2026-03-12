@@ -10,6 +10,7 @@ import { NextResponse } from 'next/server';
 import { exchangeStripeCode } from '@/lib/stripe';
 import { saveStripeAccount } from '@/lib/tokenStore';
 import { verifyStateToken } from '@/lib/crypto';
+import { connectGHLPaymentProvider } from '@/lib/ghl';
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -59,6 +60,14 @@ export async function GET(request) {
     tokenType:       oauthToken.token_type,
     scope:           oauthToken.scope,
   });
+
+  // Activate the payment provider in GHL (best-effort)
+  try {
+    await connectGHLPaymentProvider(locationId, oauthToken.livemode ?? false);
+    console.log(`[Stripe callback] GHL payment provider connected for ${locationId}`);
+  } catch (err) {
+    console.warn('[Stripe callback] connectGHLPaymentProvider failed (non-fatal):', err.message);
+  }
 
   return NextResponse.redirect(
     `${process.env.APP_URL}/dashboard?locationId=${locationId}&connected=stripe`

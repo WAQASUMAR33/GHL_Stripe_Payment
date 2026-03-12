@@ -11,6 +11,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { getConnectedAccount } from '@/lib/stripe';
 import { saveStripeAccount } from '@/lib/tokenStore';
+import { connectGHLPaymentProvider } from '@/lib/ghl';
 
 export async function POST(request) {
   try {
@@ -44,6 +45,14 @@ export async function POST(request) {
       tokenType:       'direct',
       scope:           null,
     });
+
+    // Activate the payment provider in GHL (best-effort)
+    try {
+      await connectGHLPaymentProvider(locationId, account.livemode ?? false);
+      console.log(`[connect/direct] GHL payment provider connected for ${locationId}`);
+    } catch (err) {
+      console.warn('[connect/direct] connectGHLPaymentProvider failed (non-fatal):', err.message);
+    }
 
     return NextResponse.json({
       connected:        true,

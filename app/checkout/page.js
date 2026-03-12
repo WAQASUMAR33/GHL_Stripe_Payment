@@ -81,6 +81,7 @@ export default function CheckoutPage() {
   const [clientSecret, setClientSecret]   = useState(null);
   const [error, setError]                 = useState(null);
   const [params, setParams]               = useState({});
+  const [stripeAccountId, setStripeAccountId] = useState(null);
 
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
@@ -107,7 +108,11 @@ export default function CheckoutPage() {
       .then((data) => {
         if (data.error) { setError(data.error); return; }
         setClientSecret(data.clientSecret);
-        setStripePromise(loadStripe(data.publishableKey, { stripeAccount: undefined }));
+        setStripeAccountId(data.stripeAccountId);
+        setStripePromise(loadStripe(
+          process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || data.publishableKey,
+          data.stripeAccountId ? { stripeAccount: data.stripeAccountId } : {}
+        ));
       })
       .catch((err) => setError(err.message));
   }, []);

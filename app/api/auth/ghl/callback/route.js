@@ -9,7 +9,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { exchangeGHLCode } from '@/lib/ghl';
+import { exchangeGHLCode, createGHLPaymentProvider } from '@/lib/ghl';
 import { saveGHLTokens } from '@/lib/tokenStore';
 import { verifyStateToken } from '@/lib/crypto';
 
@@ -72,6 +72,14 @@ export async function GET(request) {
       userId:        tokenData.userId,
       locationId,
     });
+
+    // Register this app as a payment provider for the location (best-effort)
+    try {
+      await createGHLPaymentProvider(locationId);
+      console.log(`[GHL callback] Payment provider registered for ${locationId}`);
+    } catch (err) {
+      console.warn('[GHL callback] createGHLPaymentProvider failed (non-fatal):', err.message);
+    }
 
     return NextResponse.redirect(
       `${baseUrl}/dashboard?locationId=${locationId}&connected=ghl`

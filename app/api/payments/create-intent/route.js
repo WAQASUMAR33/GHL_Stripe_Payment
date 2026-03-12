@@ -85,5 +85,6 @@ export async function POST(request) {
     clientSecret:    intent.client_secret,
     paymentIntentId: intent.id,
     publishableKey:  stripeAccount.publishableKey,
+    stripeAccountId: stripeAccount.stripeAccountId,
   });
 }
