@@ -9,7 +9,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { exchangeGHLCode, getLocation } from '@/lib/ghl';
+import { exchangeGHLCode } from '@/lib/ghl';
 import { saveGHLTokens } from '@/lib/tokenStore';
 import { verifyStateToken } from '@/lib/crypto';
 
