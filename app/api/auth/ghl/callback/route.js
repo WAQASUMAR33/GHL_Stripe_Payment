@@ -43,8 +43,13 @@ export async function GET(request) {
   try {
     tokenData = await exchangeGHLCode(code);
   } catch (err) {
-    console.error('[GHL OAuth] Token exchange failed:', err.response?.data ?? err.message);
-    return NextResponse.redirect(`${process.env.APP_URL}/dashboard?error=ghl_token_exchange`);
+    const detail = err.response?.data
+      ? JSON.stringify(err.response.data)
+      : err.message;
+    console.error('[GHL OAuth] Token exchange failed:', detail);
+    return NextResponse.redirect(
+      `${process.env.APP_URL}/dashboard?error=ghl_token_exchange&detail=${encodeURIComponent(detail)}`
+    );
   }
 
   const locationId = tokenData.locationId ?? stateData?.locationId;
