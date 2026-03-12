@@ -24,16 +24,18 @@ export async function GET(request) {
     return NextResponse.redirect(`${process.env.APP_URL}/dashboard?error=ghl_denied`);
   }
 
-  if (!code || !state) {
-    return NextResponse.json({ error: 'Missing code or state' }, { status: 400 });
+  if (!code) {
+    return NextResponse.json({ error: 'Missing code' }, { status: 400 });
   }
 
-  // Verify CSRF state
+  // Verify CSRF state only when present (GHL marketplace installs skip state)
   let stateData;
-  try {
-    stateData = verifyStateToken(state);
-  } catch {
-    return NextResponse.json({ error: 'Invalid state token' }, { status: 400 });
+  if (state) {
+    try {
+      stateData = verifyStateToken(state);
+    } catch {
+      return NextResponse.json({ error: 'Invalid state token' }, { status: 400 });
+    }
   }
 
   // Exchange code for tokens
@@ -45,7 +47,7 @@ export async function GET(request) {
     return NextResponse.redirect(`${process.env.APP_URL}/dashboard?error=ghl_token_exchange`);
   }
 
-  const locationId = tokenData.locationId ?? stateData.locationId;
+  const locationId = tokenData.locationId ?? stateData?.locationId;
   if (!locationId) {
     return NextResponse.json({ error: 'No locationId in token response' }, { status: 400 });
   }
