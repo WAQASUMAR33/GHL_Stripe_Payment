@@ -12,13 +12,15 @@
 import { useEffect, useState, useCallback } from 'react';
 
 export default function DashboardPage() {
-  const [locationId, setLocationId]       = useState('');
-  const [ghlConnected, setGhlConnected]   = useState(false);
-  const [stripeStatus, setStripeStatus]   = useState(null);
-  const [loading, setLoading]             = useState(false);
-  const [statusMsg, setStatusMsg]         = useState('');
-  const [error, setError]                 = useState('');
-  const [origin, setOrigin]               = useState('');
+  const [locationId, setLocationId]           = useState('');
+  const [ghlConnected, setGhlConnected]       = useState(false);
+  const [stripeStatus, setStripeStatus]       = useState(null);
+  const [loading, setLoading]                 = useState(false);
+  const [statusMsg, setStatusMsg]             = useState('');
+  const [error, setError]                     = useState('');
+  const [origin, setOrigin]                   = useState('');
+  const [directAccountId, setDirectAccountId] = useState('');
+  const [showDirect, setShowDirect]           = useState(false);
 
   // ── Read query params on mount ────────────────────────────────────────────
   useEffect(() => {
@@ -65,6 +67,30 @@ export default function DashboardPage() {
   function connectStripe() {
     if (!locationId) { setError('Enter a Location ID first.'); return; }
     window.location.href = `/api/auth/stripe?locationId=${locationId}`;
+  }
+
+  async function connectDirect() {
+    if (!locationId)      { setError('Enter a Location ID first.'); return; }
+    if (!directAccountId) { setError('Enter a Stripe Account ID (acct_...).'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      const r = await fetch('/api/connect/direct', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ locationId, stripeAccountId: directAccountId.trim() }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error ?? 'Failed to connect account'); return; }
+      setStripeStatus({ ...d });
+      setStatusMsg(`Stripe account ${d.stripeAccountId} connected directly!`);
+      setShowDirect(false);
+      setDirectAccountId('');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function startOnboarding() {
@@ -216,11 +242,43 @@ export default function DashboardPage() {
             </div>
 
             {!stripeStatus?.connected && (
-              <div className="actions-row">
-                <button className="btn btn-primary" onClick={connectStripe} disabled={!locationId || loading}>
-                  Connect with Stripe
-                </button>
-              </div>
+              <>
+                <div className="actions-row" style={{ marginBottom: 16 }}>
+                  <button className="btn btn-primary" onClick={connectStripe} disabled={!locationId || loading}>
+                    Connect with Stripe (OAuth)
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => { setShowDirect(v => !v); setError(''); }}
+                    disabled={loading}
+                  >
+                    {showDirect ? 'Cancel' : 'Connect Existing Account'}
+                  </button>
+                </div>
+
+                {showDirect && (
+                  <div style={{ background: '#f8fafc', border: '1.5px solid #e2e8f0', borderRadius: 10, padding: 20, marginTop: 8 }}>
+                    <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>
+                      Enter the Stripe Account ID of an already-onboarded connected account.
+                    </p>
+                    <div className="input-group">
+                      <input
+                        type="text"
+                        placeholder="acct_1ABC..."
+                        value={directAccountId}
+                        onChange={(e) => setDirectAccountId(e.target.value)}
+                      />
+                      <button
+                        className="btn btn-primary"
+                        onClick={connectDirect}
+                        disabled={!directAccountId || loading}
+                      >
+                        {loading ? 'Connecting…' : 'Connect Account'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
 
             {stripeStatus?.connected && (
