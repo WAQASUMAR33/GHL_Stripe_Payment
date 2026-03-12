@@ -18,9 +18,11 @@ export default function DashboardPage() {
   const [loading, setLoading]             = useState(false);
   const [statusMsg, setStatusMsg]         = useState('');
   const [error, setError]                 = useState('');
+  const [origin, setOrigin]               = useState('');
 
   // ── Read query params on mount ────────────────────────────────────────────
   useEffect(() => {
+    setOrigin(process.env.NEXT_PUBLIC_APP_URL || window.location.origin);
     const sp = new URLSearchParams(window.location.search);
     const loc = sp.get('locationId') ?? '';
     setLocationId(loc);
@@ -272,25 +274,25 @@ export default function DashboardPage() {
             <div style={{ fontSize: 13, display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div>
                 <strong>GHL Webhook URL</strong>
-                <div className="copy-url">{process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin}/api/webhooks/ghl</div>
+                <div className="copy-url">{origin}/api/webhooks/ghl</div>
               </div>
               <div>
                 <strong>Stripe Webhook URL</strong>
-                <div className="copy-url">{process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin}/api/webhooks/stripe</div>
+                <div className="copy-url">{origin}/api/webhooks/stripe</div>
               </div>
               <div>
                 <strong>GHL OAuth Redirect URI</strong>
-                <div className="copy-url">{process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin}/api/auth/ghl/callback</div>
+                <div className="copy-url">{origin}/api/auth/ghl/callback</div>
               </div>
               <div>
                 <strong>Stripe Connect Redirect URI</strong>
-                <div className="copy-url">{process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin}/api/auth/stripe/callback</div>
+                <div className="copy-url">{origin}/api/auth/stripe/callback</div>
               </div>
               {locationId && (
                 <div>
                   <strong>Checkout URL (for this location)</strong>
                   <div className="copy-url">
-                    {window.location.origin}/checkout?locationId={locationId}&entityId=ORDER_ID&entityType=invoice&amount=9900&currency=usd
+                    {origin}/checkout?locationId={locationId}&entityId=ORDER_ID&entityType=invoice&amount=9900&currency=usd
                   </div>
                 </div>
               )}
