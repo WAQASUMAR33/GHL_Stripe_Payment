@@ -6,6 +6,8 @@
  * ---------------------------------------------------------------------------
  */
 
+export const dynamic = 'force-dynamic';
+
 import { NextResponse } from 'next/server';
 import { buildGHLOAuthUrl } from '@/lib/ghl';
 import { generateStateToken } from '@/lib/crypto';

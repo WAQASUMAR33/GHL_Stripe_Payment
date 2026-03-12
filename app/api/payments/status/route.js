@@ -5,6 +5,8 @@
  * ---------------------------------------------------------------------------
  */
 
+export const dynamic = 'force-dynamic';
+
 import { NextResponse } from 'next/server';
 import { getPaymentIntent } from '@/lib/stripe';
 import { getStripeAccount } from '@/lib/tokenStore';

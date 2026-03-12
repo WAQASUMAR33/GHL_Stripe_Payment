@@ -6,6 +6,8 @@
  * ---------------------------------------------------------------------------
  */
 
+export const dynamic = 'force-dynamic';
+
 import { NextResponse } from 'next/server';
 import { createAccountLink } from '@/lib/stripe';
 import { getStripeAccount } from '@/lib/tokenStore';

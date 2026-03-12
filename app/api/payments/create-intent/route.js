@@ -20,6 +20,8 @@
  * ---------------------------------------------------------------------------
  */
 
+export const dynamic = 'force-dynamic';
+
 import { NextResponse } from 'next/server';
 import { createPaymentIntent } from '@/lib/stripe';
 import { getStripeAccount } from '@/lib/tokenStore';
