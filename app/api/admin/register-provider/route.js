@@ -69,7 +69,8 @@ export async function POST(request) {
   // ── Step 3: connect ───────────────────────────────────────────────────────
   try {
     const { data } = await client.post('/payments/custom-provider/connect', {
-      locationId,
+      altId:   locationId,
+      altType: 'location',
       liveMode: false,
     });
     results.connect = { ok: true, data };
@@ -85,7 +86,8 @@ export async function POST(request) {
   if (!results.connect.ok) {
     try {
       const { data } = await client.post('/payments/integrations/provider/whitelabel/connect', {
-        locationId,
+        altId:   locationId,
+        altType: 'location',
         liveMode: false,
       });
       results.connectAlt = { ok: true, data };
