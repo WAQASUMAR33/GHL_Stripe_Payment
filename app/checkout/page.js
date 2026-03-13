@@ -1,15 +1,21 @@
 /**
- * /checkout?locationId=xxx&entityId=yyy&entityType=invoice&amount=5000&currency=usd
+ * /checkout
  * ---------------------------------------------------------------------------
- * Customer-facing checkout page.
- * Fetches a PaymentIntent from our API, then renders Stripe Elements.
- * This page can be embedded in a GHL funnel / website via iframe.
+ * GHL custom payment provider checkout iframe.
+ *
+ * Flow:
+ *  1. Page loads → sends custom_provider_ready to parent (GHL)
+ *  2. GHL sends payment_initiate_props with amount, currency, publishableKey, etc.
+ *  3. We call /api/payments/create-intent to get a Stripe clientSecret
+ *  4. Customer completes payment via Stripe Elements
+ *  5. On success → send custom_element_success_response { chargeId: PI_ID }
+ *  6. On failure → send custom_element_error_response { error: { description } }
  * ---------------------------------------------------------------------------
  */
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import {
   Elements,
@@ -18,15 +24,19 @@ import {
   useElements,
 } from '@stripe/react-stripe-js';
 
-// ─── Inner form component ─────────────────────────────────────────────────────
+// ── helpers ──────────────────────────────────────────────────────────────────
 
-function CheckoutForm({ onSuccess }) {
+function postToParent(msg) {
+  window.parent.postMessage(msg, '*');
+}
+
+// ── CheckoutForm ──────────────────────────────────────────────────────────────
+
+function CheckoutForm({ onSuccess, onError }) {
   const stripe   = useStripe();
   const elements = useElements();
-
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState(null);
-  const [success, setSuccess] = useState(false);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -35,32 +45,23 @@ function CheckoutForm({ onSuccess }) {
     setLoading(true);
     setError(null);
 
-    const { error: stripeError } = await stripe.confirmPayment({
+    const { error: stripeError, paymentIntent } = await stripe.confirmPayment({
       elements,
-      confirmParams: {
-        return_url: window.location.href + '&payment=complete',
-      },
+      confirmParams: { return_url: window.location.href },
       redirect: 'if_required',
     });
 
     if (stripeError) {
       setError(stripeError.message);
       setLoading(false);
-    } else {
-      setSuccess(true);
+      onError?.(stripeError.message);
+    } else if (paymentIntent?.status === 'succeeded') {
       setLoading(false);
-      onSuccess?.();
+      onSuccess?.(paymentIntent.id);
+    } else {
+      setError('Payment did not complete. Please try again.');
+      setLoading(false);
     }
-  }
-
-  if (success) {
-    return (
-      <div className="success-box">
-        <div className="success-icon">✓</div>
-        <h2>Payment Successful!</h2>
-        <p>Your payment has been processed. You will receive a confirmation shortly.</p>
-      </div>
-    );
   }
 
   return (
@@ -74,53 +75,89 @@ function CheckoutForm({ onSuccess }) {
   );
 }
 
-// ─── Page component ───────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function CheckoutPage() {
   const [stripePromise, setStripePromise] = useState(null);
-  const [clientSecret, setClientSecret]   = useState(null);
-  const [error, setError]                 = useState(null);
-  const [params, setParams]               = useState({});
-  const [stripeAccountId, setStripeAccountId] = useState(null);
+  const [clientSecret,  setClientSecret]  = useState(null);
+  const [error,         setError]         = useState(null);
+  const [amountDisplay, setAmountDisplay] = useState('');
+  const [ready,         setReady]         = useState(false);
+  const initDataRef = useRef(null);
 
+  // Step 1: send custom_provider_ready and listen for payment_initiate_props
   useEffect(() => {
-    const sp = new URLSearchParams(window.location.search);
-    const p = {
-      locationId:  sp.get('locationId'),
-      entityId:    sp.get('entityId'),
-      entityType:  sp.get('entityType') ?? 'invoice',
-      amount:      parseInt(sp.get('amount') ?? '0', 10),
-      currency:    sp.get('currency') ?? 'usd',
-    };
-    setParams(p);
+    postToParent({ type: 'custom_provider_ready', loaded: true });
 
-    if (!p.locationId || !p.entityId || !p.amount) {
-      setError('Missing required checkout parameters.');
-      return;
+    function onMessage(event) {
+      const msg = event.data;
+      if (!msg || msg.type !== 'payment_initiate_props') return;
+
+      const {
+        publishableKey,
+        amount,        // decimal e.g. 100.00 = $100
+        currency = 'usd',
+        locationId,
+        transactionId,
+        orderId,
+      } = msg;
+
+      initDataRef.current = msg;
+
+      const amountCents = Math.round(amount * 100);
+
+      setAmountDisplay(
+        new Intl.NumberFormat('en-US', {
+          style: 'currency',
+          currency: currency.toUpperCase(),
+        }).format(amount)
+      );
+
+      // Create PaymentIntent on our server
+      fetch('/api/payments/create-intent', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          locationId,
+          amount:     amountCents,
+          currency:   currency.toLowerCase(),
+          entityId:   transactionId ?? orderId,
+          entityType: 'transaction',
+          metadata:   { ghlTransactionId: transactionId, ghlOrderId: orderId },
+        }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.error) { setError(data.error); return; }
+          setClientSecret(data.clientSecret);
+          // Use the publishableKey GHL sent (connected account's pk)
+          setStripePromise(
+            loadStripe(publishableKey || data.publishableKey, {
+              ...(data.stripeAccountId ? { stripeAccount: data.stripeAccountId } : {}),
+            })
+          );
+          setReady(true);
+        })
+        .catch((err) => setError(err.message));
     }
 
-    fetch('/api/payments/create-intent', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(p),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) { setError(data.error); return; }
-        setClientSecret(data.clientSecret);
-        setStripeAccountId(data.stripeAccountId);
-        setStripePromise(loadStripe(
-          process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || data.publishableKey,
-          data.stripeAccountId ? { stripeAccount: data.stripeAccountId } : {}
-        ));
-      })
-      .catch((err) => setError(err.message));
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
   }, []);
 
-  const amountDisplay = params.amount
-    ? new Intl.NumberFormat('en-US', { style: 'currency', currency: params.currency ?? 'usd' })
-        .format(params.amount / 100)
-    : '';
+  function handleSuccess(paymentIntentId) {
+    postToParent({
+      type:     'custom_element_success_response',
+      chargeId: paymentIntentId,
+    });
+  }
+
+  function handleError(description) {
+    postToParent({
+      type:  'custom_element_error_response',
+      error: { description },
+    });
+  }
 
   return (
     <>
@@ -137,10 +174,6 @@ export default function CheckoutPage() {
         .pay-btn:hover:not(:disabled) { background: #4338ca; }
         .pay-btn:disabled { opacity: .6; cursor: not-allowed; }
         .error-msg { color: #dc2626; font-size: 14px; padding: 10px; background: #fef2f2; border-radius: 6px; }
-        .success-box { text-align: center; padding: 20px; }
-        .success-icon { font-size: 48px; color: #16a34a; background: #f0fdf4; border-radius: 50%; width: 72px; height: 72px; line-height: 72px; margin: 0 auto 16px; }
-        .success-box h2 { color: #166534; font-size: 20px; margin-bottom: 8px; }
-        .success-box p { color: #6b7280; font-size: 14px; }
         .loading-text { text-align: center; color: #6b7280; padding: 32px 0; }
       `}</style>
 
@@ -153,13 +186,13 @@ export default function CheckoutPage() {
 
           {error && <div className="error-msg">{error}</div>}
 
-          {!error && !clientSecret && (
+          {!error && !ready && (
             <p className="loading-text">Loading payment details…</p>
           )}
 
-          {clientSecret && stripePromise && (
+          {ready && clientSecret && stripePromise && (
             <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: 'stripe' } }}>
-              <CheckoutForm />
+              <CheckoutForm onSuccess={handleSuccess} onError={handleError} />
             </Elements>
           )}
         </div>

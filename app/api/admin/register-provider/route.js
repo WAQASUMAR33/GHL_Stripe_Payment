@@ -79,11 +79,11 @@ export async function POST(request) {
   // ── Step 3: connect with correct body format ─────────────────────────────
   // GHL expects { live: { liveMode, apiKey, publishableKey }, test: { ... } }
   const stripeAccount  = await getStripeAccount(locationId);
-  const apiKey         = stripeAccount?.accessToken    ?? process.env.STRIPE_SECRET_KEY;
+  const apiKey         = process.env.GHL_CLIENT_SECRET;
   const publishableKey = stripeAccount?.publishableKey ?? process.env.STRIPE_PUBLISHABLE_KEY;
 
   if (!publishableKey || !apiKey) {
-    results.connect = { ok: false, error: 'STRIPE_SECRET_KEY or STRIPE_PUBLISHABLE_KEY missing from env vars' };
+    results.connect = { ok: false, error: 'GHL_CLIENT_SECRET or STRIPE_PUBLISHABLE_KEY missing from env vars' };
     return NextResponse.json(results, { status: 200 });
   }
 
