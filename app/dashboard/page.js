@@ -26,6 +26,8 @@ export default function DashboardPage() {
   const [txLoading, setTxLoading]             = useState(false);
   const [txHasMore, setTxHasMore]             = useState(false);
   const [txCursor, setTxCursor]               = useState(null);
+  const [providerResult, setProviderResult]   = useState(null);
+  const [providerLoading, setProviderLoading] = useState(false);
 
   // ── Read query params on mount ────────────────────────────────────────────
   useEffect(() => {
@@ -141,6 +143,25 @@ export default function DashboardPage() {
       setError(e.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function registerProvider() {
+    if (!locationId) { setError('Enter a Location ID first.'); return; }
+    setProviderLoading(true);
+    setProviderResult(null);
+    try {
+      const r = await fetch('/api/admin/register-provider', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ locationId }),
+      });
+      const d = await r.json();
+      setProviderResult(d);
+    } catch (e) {
+      setProviderResult({ error: e.message });
+    } finally {
+      setProviderLoading(false);
     }
   }
 
@@ -499,6 +520,48 @@ export default function DashboardPage() {
                   </div>
                 ))}
               </div>
+            </div>
+
+            <div className="card">
+              <div className="card-title">GHL Payment Provider Registration</div>
+              <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
+                Register this app as a custom payment provider in GHL so it appears in the GHL Payments Integrations list.
+                Run this after connecting your GHL location. The full API response is shown below for debugging.
+              </p>
+              <button className="btn btn-primary" onClick={registerProvider} disabled={providerLoading || !locationId} style={{ marginBottom: 16 }}>
+                {providerLoading ? 'Registering…' : 'Register / Re-register Payment Provider'}
+              </button>
+              {providerResult && (
+                <div>
+                  {/* Summary badges */}
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                    {[
+                      { key: 'token',             label: 'Token' },
+                      { key: 'createProvider',    label: 'Create Provider' },
+                      { key: 'createProviderAlt', label: 'Create Provider (alt)' },
+                      { key: 'connect',           label: 'Connect' },
+                      { key: 'connectAlt',        label: 'Connect (alt)' },
+                    ].filter(({ key }) => providerResult[key] !== undefined).map(({ key, label }) => {
+                      const val = providerResult[key];
+                      const ok = typeof val === 'string' ? val.startsWith('ok') : val?.ok === true;
+                      return (
+                        <span key={key} className={`badge ${ok ? 'green' : 'red'}`} style={{ fontSize: 12 }}>
+                          {label}: {ok ? '✓' : `✗ ${val?.status ?? ''}`}
+                        </span>
+                      );
+                    })}
+                    {providerResult.detectedProviderId && (
+                      <span className="badge gray" style={{ fontSize: 12 }}>
+                        Provider ID: {providerResult.detectedProviderId}
+                      </span>
+                    )}
+                  </div>
+                  {/* Raw JSON */}
+                  <pre style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 14, fontSize: 12, overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: '#1a1a2e', maxHeight: 360 }}>
+                    {JSON.stringify(providerResult, null, 2)}
+                  </pre>
+                </div>
+              )}
             </div>
 
             <div className="card">
