@@ -82,6 +82,11 @@ export async function POST(request) {
   const apiKey         = stripeAccount?.accessToken    ?? process.env.STRIPE_SECRET_KEY;
   const publishableKey = stripeAccount?.publishableKey ?? process.env.STRIPE_PUBLISHABLE_KEY;
 
+  if (!publishableKey || !apiKey) {
+    results.connect = { ok: false, error: 'STRIPE_SECRET_KEY or STRIPE_PUBLISHABLE_KEY missing from env vars' };
+    return NextResponse.json(results, { status: 200 });
+  }
+
   const connectBody = {
     live: { liveMode: true,  apiKey, publishableKey },
     test: { liveMode: false, apiKey, publishableKey },
