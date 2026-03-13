@@ -65,7 +65,11 @@ export async function POST(request) {
   }
 
   // ── Step 3: connect for BOTH modes (test + live) ─────────────────────────
-  const providerId = results.createProvider?.data?._id
+  // Prefer the marketplace-level provider ID from env; fall back to the one
+  // returned by the create call above.
+  const marketplaceProviderId = process.env.GHL_PAYMENT_PROVIDER_ID;
+  const providerId = marketplaceProviderId
+    ?? results.createProvider?.data?._id
     ?? results.createProvider?.data?.id
     ?? results.createProviderAlt?.data?._id
     ?? results.createProviderAlt?.data?.id;
@@ -75,9 +79,9 @@ export async function POST(request) {
   // Connect test mode (liveMode: false)
   try {
     const { data } = await client.post(`/payments/custom-provider/connect?locationId=${locationId}`, {
-      liveMode: false,
-      enabled:  true,
-      ...(providerId ? { providerId } : {}),
+      liveMode:   false,
+      enabled:    true,
+      providerId,
     });
     results.connectTest = { ok: true, data };
   } catch (err) {
@@ -91,9 +95,9 @@ export async function POST(request) {
   // Connect live mode (liveMode: true)
   try {
     const { data } = await client.post(`/payments/custom-provider/connect?locationId=${locationId}`, {
-      liveMode: true,
-      enabled:  true,
-      ...(providerId ? { providerId } : {}),
+      liveMode:   true,
+      enabled:    true,
+      providerId,
     });
     results.connectLive = { ok: true, data };
   } catch (err) {
