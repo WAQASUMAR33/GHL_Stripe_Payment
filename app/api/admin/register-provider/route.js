@@ -76,6 +76,7 @@ export async function POST(request) {
   try {
     const { data } = await client.post(`/payments/custom-provider/connect?locationId=${locationId}`, {
       liveMode: false,
+      enabled:  true,
       ...(providerId ? { providerId } : {}),
     });
     results.connectTest = { ok: true, data };
@@ -91,6 +92,7 @@ export async function POST(request) {
   try {
     const { data } = await client.post(`/payments/custom-provider/connect?locationId=${locationId}`, {
       liveMode: true,
+      enabled:  true,
       ...(providerId ? { providerId } : {}),
     });
     results.connectLive = { ok: true, data };
