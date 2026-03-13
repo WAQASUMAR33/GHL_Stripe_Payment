@@ -65,11 +65,10 @@ export async function POST(request) {
   }
 
   // ── Step 3: connect for BOTH modes (test + live) ─────────────────────────
-  // Prefer the marketplace-level provider ID from env; fall back to the one
-  // returned by the create call above.
-  const marketplaceProviderId = process.env.GHL_PAYMENT_PROVIDER_ID;
-  const providerId = marketplaceProviderId
-    ?? results.createProvider?.data?._id
+  // Use the location-level _id returned by createProvider — NOT the
+  // marketplace-level provider ID — so GHL can enable the right record.
+  const providerId =
+      results.createProvider?.data?._id
     ?? results.createProvider?.data?.id
     ?? results.createProviderAlt?.data?._id
     ?? results.createProviderAlt?.data?.id;
