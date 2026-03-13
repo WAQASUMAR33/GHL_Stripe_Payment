@@ -31,8 +31,7 @@ export async function POST(request) {
 
   // ── Step 2: create / update provider (try both endpoint variants) ─────────
   const providerBody = {
-    altId:       locationId,
-    altType:     'location',
+    locationId,
     name:        'Stripe',
     description: 'Accept payments via Stripe Connect',
     paymentsUrl: `${appUrl}/checkout`,
@@ -76,8 +75,7 @@ export async function POST(request) {
 
   try {
     const { data } = await client.post('/payments/custom-provider/connect', {
-      altId:    locationId,
-      altType:  'location',
+      locationId,
       liveMode: false,
       ...(providerId ? { providerId } : {}),
     });
@@ -94,8 +92,7 @@ export async function POST(request) {
   if (!results.connect.ok) {
     try {
       const { data } = await client.post('/payments/integrations/provider/whitelabel/connect', {
-        altId:    locationId,
-        altType:  'location',
+        locationId,
         liveMode: false,
         ...(providerId ? { providerId } : {}),
       });
