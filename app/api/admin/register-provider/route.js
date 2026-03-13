@@ -31,7 +31,7 @@ export async function POST(request) {
 
   // ── Step 2: create / update provider (try both endpoint variants) ─────────
   const providerBody = {
-    name:        'Stripe',
+    name:        'ChangeWorks',
     description: 'Accept payments via Stripe Connect',
     paymentsUrl: `${appUrl}/checkout`,
     queryUrl:    `${appUrl}/api/payments/status`,
