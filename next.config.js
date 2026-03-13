@@ -9,10 +9,15 @@ const nextConfig = {
   async headers() {
     return [
       {
-        source: '/(.*)',
+        // Allow the checkout iframe to be embedded by GHL order forms
+        // (which may be on gohighlevel.com, leadconnectorhq.com, or
+        //  any custom domain the merchant uses).
+        // X-Frame-Options is intentionally omitted — it only supports DENY /
+        // SAMEORIGIN; "ALLOWALL" is non-standard and browsers block it.
+        // CSP frame-ancestors takes precedence in all modern browsers.
+        source: '/checkout',
         headers: [
-          { key: 'X-Frame-Options', value: 'ALLOWALL' },
-          { key: 'Content-Security-Policy', value: "frame-ancestors 'self' https://*.gohighlevel.com https://*.leadconnectorhq.com" },
+          { key: 'Content-Security-Policy', value: "frame-ancestors *" },
         ],
       },
     ];
