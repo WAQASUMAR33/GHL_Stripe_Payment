@@ -24,6 +24,8 @@ export default function DashboardPage() {
   const [tab, setTab]                         = useState('dashboard');
   const [transactions, setTransactions]       = useState([]);
   const [txLoading, setTxLoading]             = useState(false);
+  const [txHasMore, setTxHasMore]             = useState(false);
+  const [txCursor, setTxCursor]               = useState(null);
 
   // ── Read query params on mount ────────────────────────────────────────────
   useEffect(() => {
@@ -61,13 +63,20 @@ export default function DashboardPage() {
     if (locationId) fetchStripeStatus(locationId);
   }, [locationId, fetchStripeStatus]);
 
-  const fetchTransactions = useCallback(async (locId) => {
+  const fetchTransactions = useCallback(async (locId, cursor = null) => {
     if (!locId) return;
     setTxLoading(true);
     try {
-      const r = await fetch(`/api/payments/transactions?locationId=${locId}&limit=50`);
+      const url = `/api/payments/transactions?locationId=${locId}&limit=25${cursor ? `&startingAfter=${cursor}` : ''}`;
+      const r = await fetch(url);
       const d = await r.json();
-      setTransactions(d.transactions ?? []);
+      if (cursor) {
+        setTransactions(prev => [...prev, ...(d.transactions ?? [])]);
+      } else {
+        setTransactions(d.transactions ?? []);
+      }
+      setTxHasMore(d.hasMore ?? false);
+      setTxCursor(d.nextCursor ?? null);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -76,7 +85,10 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    if (tab === 'transactions' && locationId) fetchTransactions(locationId);
+    if (tab === 'transactions' && locationId) {
+      setTxCursor(null);
+      fetchTransactions(locationId, null);
+    }
   }, [tab, locationId, fetchTransactions]);
 
   // ── Actions ───────────────────────────────────────────────────────────────
@@ -305,27 +317,57 @@ export default function DashboardPage() {
 
             {stripeStatus?.connected && (
               <>
+                {/* Account info row */}
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '16px 20px', marginBottom: 20, display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 2 }}>Account Name</div>
+                    <div style={{ fontSize: 15, fontWeight: 700 }}>{stripeStatus.displayName || '—'}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 2 }}>Email</div>
+                    <div style={{ fontSize: 14 }}>{stripeStatus.email || '—'}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 2 }}>Account ID</div>
+                    <div style={{ fontSize: 12, fontFamily: 'monospace', color: '#475569' }}>{stripeStatus.stripeAccountId}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 2 }}>Country</div>
+                    <div style={{ fontSize: 14 }}>{stripeStatus.country?.toUpperCase() || '—'}</div>
+                  </div>
+                  <div style={{ marginLeft: 'auto' }}>
+                    <span className={`badge ${stripeStatus.livemode ? 'green' : 'yellow'}`} style={{ fontSize: 13, padding: '4px 14px' }}>
+                      {stripeStatus.livemode ? 'Live Mode' : 'Test Mode'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Stats row */}
                 <div className="status-row" style={{ marginBottom: 20 }}>
                   <div className="stat-box">
-                    <div className="stat-label">Account</div>
-                    <div className="stat-value" style={{ fontSize: 14 }}>
-                      {stripeStatus.displayName || stripeStatus.stripeAccountId}
+                    <div className="stat-label">Available Balance</div>
+                    <div className="stat-value">
+                      {new Intl.NumberFormat('en-US', { style: 'currency', currency: stripeStatus.balanceCurrency ?? 'usd' }).format((stripeStatus.availableBalance ?? 0) / 100)}
                     </div>
                   </div>
                   <div className="stat-box">
-                    <div className="stat-label">Charges Enabled</div>
-                    <div className="stat-value">{stripeStatus.chargesEnabled ? '✅ Yes' : '❌ No'}</div>
-                  </div>
-                  <div className="stat-box">
-                    <div className="stat-label">Payouts Enabled</div>
-                    <div className="stat-value">{stripeStatus.payoutsEnabled ? '✅ Yes' : '❌ No'}</div>
-                  </div>
-                  <div className="stat-box">
-                    <div className="stat-label">Mode</div>
+                    <div className="stat-label">Pending Balance</div>
                     <div className="stat-value">
-                      <span className={`badge ${stripeStatus.livemode ? 'green' : 'yellow'}`}>
-                        {stripeStatus.livemode ? 'Live' : 'Test'}
-                      </span>
+                      {new Intl.NumberFormat('en-US', { style: 'currency', currency: stripeStatus.balanceCurrency ?? 'usd' }).format((stripeStatus.pendingBalance ?? 0) / 100)}
+                    </div>
+                  </div>
+                  <div className="stat-box">
+                    <div className="stat-label">Recent Transactions</div>
+                    <div className="stat-value">
+                      {stripeStatus.succeededTxCount ?? 0} succeeded
+                      {stripeStatus.hasMore && <span style={{ fontSize: 11, color: '#6b7280', fontWeight: 400 }}> (100+ total)</span>}
+                    </div>
+                  </div>
+                  <div className="stat-box">
+                    <div className="stat-label">Charges / Payouts</div>
+                    <div className="stat-value" style={{ fontSize: 14, display: 'flex', gap: 8 }}>
+                      <span className={`badge ${stripeStatus.chargesEnabled ? 'green' : 'red'}`}>{stripeStatus.chargesEnabled ? 'Charges ✓' : 'Charges ✗'}</span>
+                      <span className={`badge ${stripeStatus.payoutsEnabled ? 'green' : 'red'}`}>{stripeStatus.payoutsEnabled ? 'Payouts ✓' : 'Payouts ✗'}</span>
                     </div>
                   </div>
                 </div>
@@ -356,44 +398,59 @@ export default function DashboardPage() {
             {locationId && (
               <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px 16px' }}>
-                  <span style={{ fontWeight: 600, fontSize: 15 }}>Payment History</span>
-                  <button className="btn btn-secondary" onClick={() => fetchTransactions(locationId)} disabled={txLoading} style={{ padding: '6px 14px', fontSize: 13 }}>
+                  <span style={{ fontWeight: 600, fontSize: 15 }}>Payment History (live from Stripe)</span>
+                  <button className="btn btn-secondary" onClick={() => { setTxCursor(null); fetchTransactions(locationId, null); }} disabled={txLoading} style={{ padding: '6px 14px', fontSize: 13 }}>
                     {txLoading ? 'Loading…' : 'Refresh'}
                   </button>
                 </div>
-                {txLoading && <p style={{ padding: '0 24px 20px', color: '#6b7280', fontSize: 14 }}>Loading transactions…</p>}
+                {txLoading && transactions.length === 0 && <p style={{ padding: '0 24px 20px', color: '#6b7280', fontSize: 14 }}>Loading transactions…</p>}
                 {!txLoading && transactions.length === 0 && (
                   <p style={{ padding: '0 24px 24px', color: '#6b7280', fontSize: 14 }}>No transactions found.</p>
                 )}
-                {!txLoading && transactions.length > 0 && (
+                {transactions.length > 0 && (
+                  <>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                     <thead>
                       <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
                         <th style={{ padding: '10px 24px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Date</th>
                         <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Payment Intent</th>
-                        <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Entity</th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Description</th>
                         <th style={{ padding: '10px 16px', textAlign: 'right', color: '#6b7280', fontWeight: 600 }}>Amount</th>
                         <th style={{ padding: '10px 24px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Status</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {transactions.map((tx) => (
-                        <tr key={tx.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '12px 24px', color: '#475569' }}>{new Date(tx.createdAt).toLocaleDateString()}</td>
-                          <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#475569', fontSize: 12 }}>{tx.paymentIntentId}</td>
-                          <td style={{ padding: '12px 16px', color: '#475569' }}>{tx.entityType ?? '—'}</td>
-                          <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>
-                            {new Intl.NumberFormat('en-US', { style: 'currency', currency: tx.currency ?? 'usd' }).format(tx.amount / 100)}
-                          </td>
-                          <td style={{ padding: '12px 24px' }}>
-                            <span className={`badge ${tx.status === 'SUCCESS' ? 'green' : tx.status === 'FAILED' ? 'red' : tx.status === 'REFUNDED' ? 'yellow' : 'gray'}`}>
-                              {tx.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {transactions.map((tx) => {
+                        const stripeStatusColor = {
+                          succeeded:               'green',
+                          requires_payment_method: 'red',
+                          canceled:                'red',
+                          processing:              'yellow',
+                        }[tx.status] ?? 'gray';
+                        return (
+                          <tr key={tx.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                            <td style={{ padding: '12px 24px', color: '#475569' }}>{new Date(tx.created * 1000).toLocaleDateString()}</td>
+                            <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#475569', fontSize: 12 }}>{tx.id}</td>
+                            <td style={{ padding: '12px 16px', color: '#475569' }}>{tx.description ?? tx.entityType ?? '—'}</td>
+                            <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>
+                              {new Intl.NumberFormat('en-US', { style: 'currency', currency: tx.currency ?? 'usd' }).format(tx.amount / 100)}
+                            </td>
+                            <td style={{ padding: '12px 24px' }}>
+                              <span className={`badge ${stripeStatusColor}`}>{tx.status}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
+                  {txHasMore && (
+                    <div style={{ padding: '16px 24px', borderTop: '1px solid #f1f5f9', textAlign: 'center' }}>
+                      <button className="btn btn-secondary" onClick={() => fetchTransactions(locationId, txCursor)} disabled={txLoading}>
+                        {txLoading ? 'Loading…' : 'Load More'}
+                      </button>
+                    </div>
+                  )}
+                  </>
                 )}
               </div>
             )}

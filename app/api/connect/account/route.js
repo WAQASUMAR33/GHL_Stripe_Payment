@@ -11,6 +11,13 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { getConnectedAccount } from '@/lib/stripe';
 import { getStripeAccount } from '@/lib/tokenStore';
+import Stripe from 'stripe';
+
+function getStripe() {
+  return new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder', {
+    apiVersion: '2024-06-20',
+  });
+}
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -26,18 +33,39 @@ export async function GET(request) {
   }
 
   try {
+    const stripe  = getStripe();
     const account = await getConnectedAccount(stored.stripeAccountId);
+
+    // Fetch balance and recent transaction count in parallel
+    const [balance, recentIntents] = await Promise.all([
+      stripe.balance.retrieve({ stripeAccount: stored.stripeAccountId }),
+      stripe.paymentIntents.list({ limit: 100 }, { stripeAccount: stored.stripeAccountId }),
+    ]);
+
+    const availableBalance = balance.available?.reduce((sum, b) => sum + b.amount, 0) ?? 0;
+    const pendingBalance   = balance.pending?.reduce((sum, b) => sum + b.amount, 0) ?? 0;
+    const balanceCurrency  = balance.available?.[0]?.currency ?? account.default_currency ?? 'usd';
+
+    const succeededCount = recentIntents.data.filter(p => p.status === 'succeeded').length;
+    const totalCount     = recentIntents.data.length;
+
     return NextResponse.json({
-      connected:       true,
-      stripeAccountId: account.id,
-      displayName:     account.display_name || account.business_profile?.name || '',
-      email:           account.email,
-      country:         account.country,
-      currency:        account.default_currency,
-      livemode:        stored.livemode,
-      chargesEnabled:  account.charges_enabled,
-      payoutsEnabled:  account.payouts_enabled,
+      connected:        true,
+      stripeAccountId:  account.id,
+      displayName:      account.display_name || account.business_profile?.name || '',
+      email:            account.email,
+      country:          account.country,
+      currency:         account.default_currency,
+      livemode:         stored.livemode,
+      chargesEnabled:   account.charges_enabled,
+      payoutsEnabled:   account.payouts_enabled,
       detailsSubmitted: account.details_submitted,
+      availableBalance,
+      pendingBalance,
+      balanceCurrency,
+      recentTxCount:    totalCount,
+      succeededTxCount: succeededCount,
+      hasMore:          recentIntents.has_more,
     });
   } catch (err) {
     console.error('[connect/account]', err.message);
