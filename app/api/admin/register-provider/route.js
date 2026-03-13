@@ -31,7 +31,6 @@ export async function POST(request) {
 
   // ── Step 2: create / update provider (try both endpoint variants) ─────────
   const providerBody = {
-    locationId,
     name:        'Stripe',
     description: 'Accept payments via Stripe Connect',
     paymentsUrl: `${appUrl}/checkout`,
@@ -39,9 +38,9 @@ export async function POST(request) {
     imageUrl:    'https://upload.wikimedia.org/wikipedia/commons/b/ba/Stripe_Logo%2C_revised_2016.svg',
   };
 
-  // Try primary endpoint
+  // Try primary endpoint — locationId as query param
   try {
-    const { data } = await client.post('/payments/custom-provider/provider', providerBody);
+    const { data } = await client.post(`/payments/custom-provider/provider?locationId=${locationId}`, providerBody);
     results.createProvider = { ok: true, data };
   } catch (err) {
     results.createProvider = {
@@ -74,8 +73,7 @@ export async function POST(request) {
   results.detectedProviderId = providerId ?? null;
 
   try {
-    const { data } = await client.post('/payments/custom-provider/connect', {
-      locationId,
+    const { data } = await client.post(`/payments/custom-provider/connect?locationId=${locationId}`, {
       liveMode: false,
       ...(providerId ? { providerId } : {}),
     });
