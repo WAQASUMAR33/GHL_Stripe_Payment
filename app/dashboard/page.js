@@ -335,6 +335,20 @@ export default function DashboardPage() {
                     <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 2 }}>Country</div>
                     <div style={{ fontSize: 14 }}>{stripeStatus.country?.toUpperCase() || '—'}</div>
                   </div>
+                  {stripeStatus.website && (
+                    <div>
+                      <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 2 }}>Website</div>
+                      <div style={{ fontSize: 14 }}>
+                        <a href={stripeStatus.website} target="_blank" rel="noreferrer" style={{ color: '#4f46e5', textDecoration: 'none' }}>{stripeStatus.website.replace(/^https?:\/\//, '')}</a>
+                      </div>
+                    </div>
+                  )}
+                  {stripeStatus.createdAt && (
+                    <div>
+                      <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 2 }}>Created On</div>
+                      <div style={{ fontSize: 14 }}>{new Date(stripeStatus.createdAt * 1000).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+                    </div>
+                  )}
                   <div style={{ marginLeft: 'auto' }}>
                     <span className={`badge ${stripeStatus.livemode ? 'green' : 'yellow'}`} style={{ fontSize: 13, padding: '4px 14px' }}>
                       {stripeStatus.livemode ? 'Live Mode' : 'Test Mode'}
