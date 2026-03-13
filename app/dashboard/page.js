@@ -21,6 +21,9 @@ export default function DashboardPage() {
   const [origin, setOrigin]                   = useState('');
   const [directAccountId, setDirectAccountId] = useState('');
   const [showDirect, setShowDirect]           = useState(false);
+  const [tab, setTab]                         = useState('dashboard');
+  const [transactions, setTransactions]       = useState([]);
+  const [txLoading, setTxLoading]             = useState(false);
 
   // ── Read query params on mount ────────────────────────────────────────────
   useEffect(() => {
@@ -57,6 +60,24 @@ export default function DashboardPage() {
   useEffect(() => {
     if (locationId) fetchStripeStatus(locationId);
   }, [locationId, fetchStripeStatus]);
+
+  const fetchTransactions = useCallback(async (locId) => {
+    if (!locId) return;
+    setTxLoading(true);
+    try {
+      const r = await fetch(`/api/payments/transactions?locationId=${locId}&limit=50`);
+      const d = await r.json();
+      setTransactions(d.transactions ?? []);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setTxLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'transactions' && locationId) fetchTransactions(locationId);
+  }, [tab, locationId, fetchTransactions]);
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
@@ -185,13 +206,14 @@ export default function DashboardPage() {
         <div className="sidebar">
           <h2>PayProvider</h2>
           <p>GHL + Stripe Connect</p>
-          <div className="nav-item active">Dashboard</div>
-          <div className="nav-item">Transactions</div>
-          <div className="nav-item">Settings</div>
+          <div className={`nav-item ${tab === 'dashboard'     ? 'active' : ''}`} onClick={() => setTab('dashboard')}>Dashboard</div>
+          <div className={`nav-item ${tab === 'transactions'  ? 'active' : ''}`} onClick={() => setTab('transactions')}>Transactions</div>
+          <div className={`nav-item ${tab === 'settings'      ? 'active' : ''}`} onClick={() => setTab('settings')}>Settings</div>
         </div>
 
         {/* Main */}
         <div className="main">
+          {tab === 'dashboard' && <>
           <h1 className="page-title">Integration Dashboard</h1>
           <p className="page-sub">Connect your GHL location to a Stripe account to start accepting payments.</p>
 
@@ -322,40 +344,113 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Webhook / Integration Info */}
-          <div className="card">
-            <div className="card-title">Integration Endpoints</div>
-            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>
-              Register these URLs in your GHL Marketplace app and Stripe Dashboard.
-            </p>
+          </> /* end dashboard tab */}
 
-            <div style={{ fontSize: 13, display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div>
-                <strong>GHL Webhook URL</strong>
-                <div className="copy-url">{origin}/api/webhooks/ghl</div>
+          {/* ── Transactions Tab ──────────────────────────────────────────── */}
+          {tab === 'transactions' && <>
+            <h1 className="page-title">Transactions</h1>
+            <p className="page-sub">Recent payment events for this location.</p>
+
+            {!locationId && <div className="alert alert-error">Enter a Location ID on the Dashboard tab first.</div>}
+
+            {locationId && (
+              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px 16px' }}>
+                  <span style={{ fontWeight: 600, fontSize: 15 }}>Payment History</span>
+                  <button className="btn btn-secondary" onClick={() => fetchTransactions(locationId)} disabled={txLoading} style={{ padding: '6px 14px', fontSize: 13 }}>
+                    {txLoading ? 'Loading…' : 'Refresh'}
+                  </button>
+                </div>
+                {txLoading && <p style={{ padding: '0 24px 20px', color: '#6b7280', fontSize: 14 }}>Loading transactions…</p>}
+                {!txLoading && transactions.length === 0 && (
+                  <p style={{ padding: '0 24px 24px', color: '#6b7280', fontSize: 14 }}>No transactions found.</p>
+                )}
+                {!txLoading && transactions.length > 0 && (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                        <th style={{ padding: '10px 24px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Date</th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Payment Intent</th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Entity</th>
+                        <th style={{ padding: '10px 16px', textAlign: 'right', color: '#6b7280', fontWeight: 600 }}>Amount</th>
+                        <th style={{ padding: '10px 24px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {transactions.map((tx) => (
+                        <tr key={tx.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '12px 24px', color: '#475569' }}>{new Date(tx.createdAt).toLocaleDateString()}</td>
+                          <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#475569', fontSize: 12 }}>{tx.paymentIntentId}</td>
+                          <td style={{ padding: '12px 16px', color: '#475569' }}>{tx.entityType ?? '—'}</td>
+                          <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>
+                            {new Intl.NumberFormat('en-US', { style: 'currency', currency: tx.currency ?? 'usd' }).format(tx.amount / 100)}
+                          </td>
+                          <td style={{ padding: '12px 24px' }}>
+                            <span className={`badge ${tx.status === 'SUCCESS' ? 'green' : tx.status === 'FAILED' ? 'red' : tx.status === 'REFUNDED' ? 'yellow' : 'gray'}`}>
+                              {tx.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
-              <div>
-                <strong>Stripe Webhook URL</strong>
-                <div className="copy-url">{origin}/api/webhooks/stripe</div>
+            )}
+          </>}
+
+          {/* ── Settings Tab ─────────────────────────────────────────────── */}
+          {tab === 'settings' && <>
+            <h1 className="page-title">Settings</h1>
+            <p className="page-sub">Integration endpoints and configuration reference.</p>
+
+            <div className="card">
+              <div className="card-title">Integration Endpoints</div>
+              <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Register these URLs in your GHL Marketplace app and Stripe Dashboard.</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, fontSize: 13 }}>
+                {[
+                  { label: 'GHL Webhook URL',            url: `${origin}/api/webhooks/ghl` },
+                  { label: 'Stripe Webhook URL',         url: `${origin}/api/webhooks/stripe` },
+                  { label: 'GHL OAuth Redirect URI',     url: `${origin}/api/auth/ghl/callback` },
+                  { label: 'Stripe Connect Redirect URI',url: `${origin}/api/auth/stripe/callback` },
+                  { label: 'Checkout URL (template)',    url: `${origin}/checkout?locationId=${locationId || 'LOCATION_ID'}&entityId=ORDER_ID&entityType=invoice&amount=9900&currency=usd` },
+                  { label: 'Payment Status Query URL',   url: `${origin}/api/payments/status` },
+                ].map(({ label, url }) => (
+                  <div key={label}>
+                    <strong>{label}</strong>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+                      <div className="copy-url" style={{ flex: 1, margin: 0 }}>{url}</div>
+                      <button className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: 12, flexShrink: 0 }}
+                        onClick={() => { navigator.clipboard.writeText(url); }}>
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div>
-                <strong>GHL OAuth Redirect URI</strong>
-                <div className="copy-url">{origin}/api/auth/ghl/callback</div>
-              </div>
-              <div>
-                <strong>Stripe Connect Redirect URI</strong>
-                <div className="copy-url">{origin}/api/auth/stripe/callback</div>
-              </div>
-              {locationId && (
-                <div>
-                  <strong>Checkout URL (for this location)</strong>
-                  <div className="copy-url">
-                    {origin}/checkout?locationId={locationId}&entityId=ORDER_ID&entityType=invoice&amount=9900&currency=usd
+            </div>
+
+            <div className="card">
+              <div className="card-title">Connection Status</div>
+              <div className="status-row">
+                <div className="stat-box">
+                  <div className="stat-label">GHL Location</div>
+                  <div className="stat-value" style={{ fontSize: 14 }}>{locationId || '—'}</div>
+                </div>
+                <div className="stat-box">
+                  <div className="stat-label">Stripe Account</div>
+                  <div className="stat-value" style={{ fontSize: 14 }}>{stripeStatus?.stripeAccountId || '—'}</div>
+                </div>
+                <div className="stat-box">
+                  <div className="stat-label">Mode</div>
+                  <div className="stat-value">
+                    {stripeStatus ? <span className={`badge ${stripeStatus.livemode ? 'green' : 'yellow'}`}>{stripeStatus.livemode ? 'Live' : 'Test'}</span> : '—'}
                   </div>
                 </div>
-              )}
+              </div>
             </div>
-          </div>
+          </>}
+
         </div>
       </div>
     </>
