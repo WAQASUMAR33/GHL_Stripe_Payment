@@ -80,7 +80,7 @@ export async function POST(request) {
   // GHL expects { live: { liveMode, apiKey, publishableKey }, test: { ... } }
   const stripeAccount  = await getStripeAccount(locationId);
   const apiKey         = process.env.GHL_CLIENT_SECRET;
-  const publishableKey = stripeAccount?.publishableKey ?? process.env.STRIPE_PUBLISHABLE_KEY;
+  const publishableKey = stripeAccount?.publishableKey || process.env.STRIPE_PUBLISHABLE_KEY;
 
   results.envCheck = {
     hasGhlClientSecret:    !!process.env.GHL_CLIENT_SECRET,
