@@ -10,6 +10,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { ghlClient, getValidAccessToken } from '@/lib/ghl';
+import { getStripeAccount } from '@/lib/tokenStore';
 
 export async function POST(request) {
   const { locationId } = await request.json();
@@ -75,61 +76,29 @@ export async function POST(request) {
 
   results.detectedProviderId = providerId ?? null;
 
-  // Connect test mode (liveMode: false)
+  // ── Step 3: connect with correct body format ─────────────────────────────
+  // GHL expects { live: { liveMode, apiKey, publishableKey }, test: { ... } }
+  const stripeAccount  = await getStripeAccount(locationId);
+  const apiKey         = stripeAccount?.accessToken    ?? process.env.STRIPE_SECRET_KEY;
+  const publishableKey = stripeAccount?.publishableKey ?? process.env.STRIPE_PUBLISHABLE_KEY;
+
+  const connectBody = {
+    live: { liveMode: true,  apiKey, publishableKey },
+    test: { liveMode: false, apiKey, publishableKey },
+  };
+
   try {
-    const { data } = await client.post(`/payments/custom-provider/connect?locationId=${locationId}`, {
-      locationId,
-      liveMode:   false,
-      enabled:    true,
-      providerId,
-    });
-    results.connectTest = { ok: true, data };
+    const { data } = await client.post(
+      `/payments/custom-provider/connect?locationId=${locationId}`,
+      connectBody
+    );
+    results.connect = { ok: true, data };
   } catch (err) {
-    results.connectTest = {
+    results.connect = {
       ok:     false,
       status: err.response?.status,
       error:  err.response?.data ?? err.message,
     };
-  }
-
-  // Connect live mode (liveMode: true)
-  try {
-    const { data } = await client.post(`/payments/custom-provider/connect?locationId=${locationId}`, {
-      locationId,
-      liveMode:   true,
-      enabled:    true,
-      providerId,
-    });
-    results.connectLive = { ok: true, data };
-  } catch (err) {
-    results.connectLive = {
-      ok:     false,
-      status: err.response?.status,
-      error:  err.response?.data ?? err.message,
-    };
-  }
-
-  // ── Step 4: PATCH providerConfig to set enabled on both modes ────────────
-  // The connect endpoint doesn't persist the enabled flag, so update directly.
-  if (providerId) {
-    try {
-      const { data } = await client.patch(
-        `/payments/custom-provider/provider/${providerId}?locationId=${locationId}`,
-        {
-          providerConfig: {
-            live: { liveMode: true,  enabled: true },
-            test: { liveMode: false, enabled: true },
-          },
-        }
-      );
-      results.patchConfig = { ok: true, data };
-    } catch (err) {
-      results.patchConfig = {
-        ok:     false,
-        status: err.response?.status,
-        error:  err.response?.data ?? err.message,
-      };
-    }
   }
 
   return NextResponse.json(results, { status: 200 });
