@@ -87,31 +87,47 @@ export default function CheckoutPage() {
 
   // Step 1: send custom_provider_ready and listen for payment_initiate_props
   useEffect(() => {
+    // Send immediately, then retry every 500 ms until GHL responds
+    // (GHL may not be listening yet on the first tick)
     postToParent({ type: 'custom_provider_ready', loaded: true });
+    const readyInterval = setInterval(() => {
+      if (!initDataRef.current) {
+        postToParent({ type: 'custom_provider_ready', loaded: true });
+      }
+    }, 500);
 
     function onMessage(event) {
       const msg = event.data;
       if (!msg || msg.type !== 'payment_initiate_props') return;
+      clearInterval(readyInterval);
 
       const {
         publishableKey,
-        amount,        // decimal e.g. 100.00 = $100
+        amount,           // decimal e.g. 100.00 = $100
         currency = 'usd',
         locationId,
         transactionId,
         orderId,
+        entityId,         // GHL may send this directly
+        entityType,       // GHL may send this directly
+        contactId,
       } = msg;
 
       initDataRef.current = msg;
 
-      const amountCents = Math.round(amount * 100);
+      // GHL sends amount as a decimal (e.g. 100.00 = $100.00)
+      const amountCents = Math.round(Number(amount) * 100);
 
       setAmountDisplay(
         new Intl.NumberFormat('en-US', {
           style: 'currency',
-          currency: currency.toUpperCase(),
-        }).format(amount)
+          currency: (currency || 'usd').toUpperCase(),
+        }).format(Number(amount))
       );
+
+      // Resolve entityId — GHL may send it under different keys
+      const resolvedEntityId   = entityId || transactionId || orderId || `ghl-${Date.now()}`;
+      const resolvedEntityType = entityType || 'transaction';
 
       // Create PaymentIntent on our server
       fetch('/api/payments/create-intent', {
@@ -120,10 +136,15 @@ export default function CheckoutPage() {
         body: JSON.stringify({
           locationId,
           amount:     amountCents,
-          currency:   currency.toLowerCase(),
-          entityId:   transactionId ?? orderId,
-          entityType: 'transaction',
-          metadata:   { ghlTransactionId: transactionId, ghlOrderId: orderId },
+          currency:   (currency || 'usd').toLowerCase(),
+          entityId:   resolvedEntityId,
+          entityType: resolvedEntityType,
+          metadata: {
+            ghlTransactionId: transactionId ?? null,
+            ghlOrderId:       orderId       ?? null,
+            ghlEntityId:      entityId      ?? null,
+            ghlContactId:     contactId     ?? null,
+          },
         }),
       })
         .then((r) => r.json())
@@ -142,7 +163,10 @@ export default function CheckoutPage() {
     }
 
     window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
+    return () => {
+      clearInterval(readyInterval);
+      window.removeEventListener('message', onMessage);
+    };
   }, []);
 
   function handleSuccess(paymentIntentId) {

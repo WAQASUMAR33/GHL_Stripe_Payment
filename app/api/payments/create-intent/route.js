@@ -44,12 +44,17 @@ export async function POST(request) {
     metadata = {},
   } = body;
 
-  if (!locationId || !amount || !entityId || !entityType) {
+  if (!locationId || !amount) {
     return NextResponse.json(
-      { error: 'locationId, amount, entityId, and entityType are required' },
+      { error: 'locationId and amount are required' },
       { status: 400 }
     );
   }
+
+  // entityId / entityType are optional — use fallbacks so the checkout
+  // page works even when GHL omits them from payment_initiate_props
+  const finalEntityId   = entityId   || `ghl-${Date.now()}`;
+  const finalEntityType = entityType || 'transaction';
 
   const stripeAccount = await getStripeAccount(locationId);
   if (!stripeAccount) {
@@ -71,8 +76,8 @@ export async function POST(request) {
       applicationFeeAmount: applicationFeeAmount || undefined,
       metadata: {
         locationId,
-        entityId,
-        entityType,
+        entityId:   finalEntityId,
+        entityType: finalEntityType,
         ...metadata,
       },
     });

@@ -95,8 +95,8 @@ export async function POST(request) {
   }
 
   const connectBody = {
-    live: { liveMode: true,  apiKey, publishableKey },
-    test: { liveMode: false, apiKey, publishableKey },
+    live: { liveMode: true,  apiKey, publishableKey, enabled: true },
+    test: { liveMode: false, apiKey, publishableKey, enabled: true },
   };
 
   try {
