@@ -78,6 +78,7 @@ export async function POST(request) {
   // Connect test mode (liveMode: false)
   try {
     const { data } = await client.post(`/payments/custom-provider/connect?locationId=${locationId}`, {
+      locationId,
       liveMode:   false,
       enabled:    true,
       providerId,
@@ -94,6 +95,7 @@ export async function POST(request) {
   // Connect live mode (liveMode: true)
   try {
     const { data } = await client.post(`/payments/custom-provider/connect?locationId=${locationId}`, {
+      locationId,
       liveMode:   true,
       enabled:    true,
       providerId,
@@ -105,6 +107,29 @@ export async function POST(request) {
       status: err.response?.status,
       error:  err.response?.data ?? err.message,
     };
+  }
+
+  // ── Step 4: PATCH providerConfig to set enabled on both modes ────────────
+  // The connect endpoint doesn't persist the enabled flag, so update directly.
+  if (providerId) {
+    try {
+      const { data } = await client.patch(
+        `/payments/custom-provider/provider/${providerId}?locationId=${locationId}`,
+        {
+          providerConfig: {
+            live: { liveMode: true,  enabled: true },
+            test: { liveMode: false, enabled: true },
+          },
+        }
+      );
+      results.patchConfig = { ok: true, data };
+    } catch (err) {
+      results.patchConfig = {
+        ok:     false,
+        status: err.response?.status,
+        error:  err.response?.data ?? err.message,
+      };
+    }
   }
 
   return NextResponse.json(results, { status: 200 });
