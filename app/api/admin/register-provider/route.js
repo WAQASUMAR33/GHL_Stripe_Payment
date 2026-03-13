@@ -64,7 +64,7 @@ export async function POST(request) {
     }
   }
 
-  // ── Step 3: connect (pass providerId if we got one from create) ──────────
+  // ── Step 3: connect for BOTH modes (test + live) ─────────────────────────
   const providerId = results.createProvider?.data?._id
     ?? results.createProvider?.data?.id
     ?? results.createProviderAlt?.data?._id
@@ -72,36 +72,34 @@ export async function POST(request) {
 
   results.detectedProviderId = providerId ?? null;
 
+  // Connect test mode (liveMode: false)
   try {
     const { data } = await client.post(`/payments/custom-provider/connect?locationId=${locationId}`, {
       liveMode: false,
       ...(providerId ? { providerId } : {}),
     });
-    results.connect = { ok: true, data };
+    results.connectTest = { ok: true, data };
   } catch (err) {
-    results.connect = {
+    results.connectTest = {
       ok:     false,
       status: err.response?.status,
       error:  err.response?.data ?? err.message,
     };
   }
 
-  // Try alternate connect endpoint
-  if (!results.connect.ok) {
-    try {
-      const { data } = await client.post('/payments/integrations/provider/whitelabel/connect', {
-        locationId,
-        liveMode: false,
-        ...(providerId ? { providerId } : {}),
-      });
-      results.connectAlt = { ok: true, data };
-    } catch (err) {
-      results.connectAlt = {
-        ok:     false,
-        status: err.response?.status,
-        error:  err.response?.data ?? err.message,
-      };
-    }
+  // Connect live mode (liveMode: true)
+  try {
+    const { data } = await client.post(`/payments/custom-provider/connect?locationId=${locationId}`, {
+      liveMode: true,
+      ...(providerId ? { providerId } : {}),
+    });
+    results.connectLive = { ok: true, data };
+  } catch (err) {
+    results.connectLive = {
+      ok:     false,
+      status: err.response?.status,
+      error:  err.response?.data ?? err.message,
+    };
   }
 
   return NextResponse.json(results, { status: 200 });
