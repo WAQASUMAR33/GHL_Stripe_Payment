@@ -66,12 +66,20 @@ export async function POST(request) {
     }
   }
 
-  // ── Step 3: connect ───────────────────────────────────────────────────────
+  // ── Step 3: connect (pass providerId if we got one from create) ──────────
+  const providerId = results.createProvider?.data?._id
+    ?? results.createProvider?.data?.id
+    ?? results.createProviderAlt?.data?._id
+    ?? results.createProviderAlt?.data?.id;
+
+  results.detectedProviderId = providerId ?? null;
+
   try {
     const { data } = await client.post('/payments/custom-provider/connect', {
-      altId:   locationId,
-      altType: 'location',
+      altId:    locationId,
+      altType:  'location',
       liveMode: false,
+      ...(providerId ? { providerId } : {}),
     });
     results.connect = { ok: true, data };
   } catch (err) {
@@ -86,9 +94,10 @@ export async function POST(request) {
   if (!results.connect.ok) {
     try {
       const { data } = await client.post('/payments/integrations/provider/whitelabel/connect', {
-        altId:   locationId,
-        altType: 'location',
+        altId:    locationId,
+        altType:  'location',
         liveMode: false,
+        ...(providerId ? { providerId } : {}),
       });
       results.connectAlt = { ok: true, data };
     } catch (err) {
