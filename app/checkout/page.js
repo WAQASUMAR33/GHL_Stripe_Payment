@@ -92,19 +92,30 @@ function CheckoutForm({ onSuccess, onError }) {
         type="submit"
         disabled={!stripe || loading}
         style={{
-          background: loading ? '#6366f1' : '#4f46e5',
+          background: (!stripe || loading) ? '#a5b4fc' : '#4f46e5',
           color: '#fff',
           border: 'none',
           padding: '14px 0',
           borderRadius: 8,
-          fontSize: 16,
+          fontSize: 15,
           fontWeight: 600,
-          cursor: loading ? 'not-allowed' : 'pointer',
-          opacity: (!stripe || loading) ? 0.7 : 1,
+          cursor: (!stripe || loading) ? 'not-allowed' : 'pointer',
           transition: 'background .2s',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          width: '100%',
         }}
       >
-        {loading ? 'Processing…' : 'Pay Now'}
+        {loading ? (
+          <>
+            <span style={{ display: 'inline-block', width: 16, height: 16, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+            Processing…
+          </>
+        ) : (
+          <>🔒 Pay Now</>
+        )}
       </button>
     </form>
   );
@@ -227,36 +238,85 @@ export default function CheckoutPage() {
     <>
       <style>{`
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        html, body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
           background: transparent;
-          padding: 16px;
+          min-height: 100%;
+        }
+        .checkout-wrapper {
+          display: flex;
+          justify-content: center;
+          align-items: flex-start;
+          padding: 24px 16px;
+        }
+        .checkout-card {
+          width: 100%;
+          max-width: 520px;
+          background: #ffffff;
+          border-radius: 12px;
+          box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+          padding: 32px 28px;
+        }
+        .checkout-header {
+          text-align: center;
+          margin-bottom: 24px;
+        }
+        .checkout-header .lock-icon {
+          font-size: 22px;
+          margin-bottom: 6px;
+        }
+        .checkout-header h2 {
+          font-size: 18px;
+          font-weight: 700;
+          color: #111827;
+          margin-bottom: 4px;
+        }
+        .checkout-header p {
+          font-size: 13px;
+          color: #6b7280;
+        }
+        .divider {
+          border: none;
+          border-top: 1px solid #e5e7eb;
+          margin: 20px 0;
         }
       `}</style>
 
-      {error && (
-        <div style={{ color: '#dc2626', fontSize: 14, padding: '10px 12px', background: '#fef2f2', borderRadius: 6, marginBottom: 12 }}>
-          {error}
+      <div className="checkout-wrapper">
+        <div className="checkout-card">
+          <div className="checkout-header">
+            <div className="lock-icon">🔒</div>
+            <h2>Secure Payment</h2>
+            <p>Your payment info is encrypted and secure</p>
+          </div>
+
+          <hr className="divider" />
+
+          {error && (
+            <div style={{ color: '#dc2626', fontSize: 14, padding: '10px 12px', background: '#fef2f2', borderRadius: 8, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>⚠️</span> {error}
+            </div>
+          )}
+
+          {!error && !ready && (
+            <div style={{ textAlign: 'center', padding: '32px 0' }}>
+              <div style={{ display: 'inline-block', width: 28, height: 28, border: '3px solid #e5e7eb', borderTopColor: '#4f46e5', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+              <p style={{ marginTop: 12, color: '#6b7280', fontSize: 14 }}>Loading payment form…</p>
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            </div>
+          )}
+
+          {ready && clientSecret && stripePromise && (
+            <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: 'stripe', variables: { borderRadius: '8px', colorPrimary: '#4f46e5' } } }}>
+              <CheckoutForm onSuccess={handleSuccess} onError={handleError} />
+            </Elements>
+          )}
+
+          <p style={{ textAlign: 'center', marginTop: 20, fontSize: 12, color: '#9ca3af' }}>
+            🔐 256-bit SSL encrypted · Powered by Stripe
+          </p>
         </div>
-      )}
-
-      {!error && !ready && (
-        <p style={{ textAlign: 'center', color: '#6b7280', padding: '24px 0', fontSize: 14 }}>
-          Loading payment form…
-        </p>
-      )}
-
-      {/* Debug panel — remove once issue is resolved */}
-      <div style={{ marginTop: 12, background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 6, padding: '8px 10px', fontSize: 11, fontFamily: 'monospace', color: '#0369a1' }}>
-        <strong>Debug log:</strong>
-        {debugLog.map((l, i) => <div key={i}>› {l}</div>)}
       </div>
-
-      {ready && clientSecret && stripePromise && (
-        <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: 'stripe' } }}>
-          <CheckoutForm onSuccess={handleSuccess} onError={handleError} />
-        </Elements>
-      )}
     </>
   );
 }
