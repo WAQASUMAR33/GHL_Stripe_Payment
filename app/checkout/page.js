@@ -117,7 +117,13 @@ export default function CheckoutPage() {
   const [clientSecret,  setClientSecret]  = useState(null);
   const [error,         setError]         = useState(null);
   const [ready,         setReady]         = useState(false);
+  const [debugLog,      setDebugLog]      = useState(['page loaded']);
   const initDataRef = useRef(null);
+
+  function addLog(msg) {
+    console.log('[checkout]', msg);
+    setDebugLog((prev) => [...prev.slice(-9), msg]);
+  }
 
   useEffect(() => {
     // ── Report height whenever the DOM changes ──
@@ -125,6 +131,7 @@ export default function CheckoutPage() {
     ro.observe(document.documentElement);
 
     // ── Send custom_provider_ready repeatedly until GHL responds ──
+    addLog('sending custom_provider_ready…');
     window.parent.postMessage(JSON.stringify({ type: 'custom_provider_ready', loaded: true }), '*');
     const readyInterval = setInterval(() => {
       if (!initDataRef.current) {
@@ -134,11 +141,17 @@ export default function CheckoutPage() {
 
     // ── Listen for payment_initiate_props from GHL ──
     function onMessage(event) {
-      const msg = event.data;
+      // GHL may send message as a JSON string or a plain object — handle both
+      let msg = event.data;
+      if (typeof msg === 'string') {
+        try { msg = JSON.parse(msg); } catch { return; }
+      }
+      addLog(`msg received: type=${msg?.type ?? 'unknown'} origin=${event.origin}`);
       if (!msg || msg.type !== 'payment_initiate_props') return;
       if (initDataRef.current) return; // already handled
       clearInterval(readyInterval);
       initDataRef.current = msg;
+      addLog(`payment_initiate_props: amount=${msg.amount} currency=${msg.currency} locationId=${msg.locationId}`);
       initPayment(msg);
     }
 
@@ -168,6 +181,8 @@ export default function CheckoutPage() {
     const resolvedEntityType = entityType || 'transaction';
     const amountCents        = Math.round(Number(amount) * 100);
 
+    addLog(`calling create-intent: ${amountCents} ${resolvedCurrency} locationId=${locationId}`);
+
     fetch('/api/payments/create-intent', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -187,7 +202,8 @@ export default function CheckoutPage() {
     })
       .then((r) => r.json())
       .then((data) => {
-        if (data.error) { setError(data.error); return; }
+        if (data.error) { addLog(`create-intent error: ${data.error}`); setError(data.error); return; }
+        addLog(`create-intent ok, loading Stripe…`);
         setClientSecret(data.clientSecret);
         setStripePromise(
           loadStripe(publishableKey || data.publishableKey, {
@@ -196,7 +212,7 @@ export default function CheckoutPage() {
         );
         setReady(true);
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => { addLog(`create-intent fetch error: ${err.message}`); setError(err.message); });
   }
 
   function handleSuccess(paymentIntentId) {
@@ -229,6 +245,12 @@ export default function CheckoutPage() {
           Loading payment form…
         </p>
       )}
+
+      {/* Debug panel — remove once issue is resolved */}
+      <div style={{ marginTop: 12, background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 6, padding: '8px 10px', fontSize: 11, fontFamily: 'monospace', color: '#0369a1' }}>
+        <strong>Debug log:</strong>
+        {debugLog.map((l, i) => <div key={i}>› {l}</div>)}
+      </div>
 
       {ready && clientSecret && stripePromise && (
         <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: 'stripe' } }}>
