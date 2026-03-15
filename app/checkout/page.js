@@ -125,10 +125,10 @@ export default function CheckoutPage() {
     ro.observe(document.documentElement);
 
     // ── Send custom_provider_ready repeatedly until GHL responds ──
-    postToParent({ type: 'custom_provider_ready', loaded: true });
+    window.parent.postMessage(JSON.stringify({ type: 'custom_provider_ready', loaded: true }), '*');
     const readyInterval = setInterval(() => {
       if (!initDataRef.current) {
-        postToParent({ type: 'custom_provider_ready', loaded: true });
+        window.parent.postMessage(JSON.stringify({ type: 'custom_provider_ready', loaded: true }), '*');
       }
     }, 500);
 
