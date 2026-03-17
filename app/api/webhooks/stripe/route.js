@@ -8,7 +8,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { constructWebhookEvent } from '@/lib/stripe';
+import { constructWebhookEvent, getPaymentIntentWithCharge } from '@/lib/stripe';
 import {
   getLocationByStripeAccount,
   upsertPaymentEvent,
@@ -59,6 +59,22 @@ export async function POST(request) {
 
       case 'payment_intent.succeeded': {
         const intent = event.data.object;
+
+        // Fetch the charge to get billing_details (name, email, phone).
+        // Fall back to values stored in metadata by the checkout page.
+        let customerName  = intent.metadata?.customerName  ?? null;
+        let customerEmail = intent.metadata?.customerEmail ?? intent.receipt_email ?? null;
+        let customerPhone = intent.metadata?.customerPhone ?? null;
+        try {
+          const full    = await getPaymentIntentWithCharge(intent.id, stripeAccountId);
+          const billing = full.latest_charge?.billing_details ?? {};
+          customerName  = billing.name  || customerName;
+          customerEmail = billing.email || customerEmail;
+          customerPhone = billing.phone || customerPhone;
+        } catch (chargeErr) {
+          console.warn('[Stripe Webhook] Could not expand charge:', chargeErr.message);
+        }
+
         await upsertPaymentEvent({
           locationId:      locationId ?? intent.metadata?.locationId,
           stripeAccountId: stripeAccountId ?? '',
@@ -68,6 +84,9 @@ export async function POST(request) {
           amount:          intent.amount,
           currency:        intent.currency,
           status:          'SUCCESS',
+          customerName,
+          customerEmail,
+          customerPhone,
           metadata:        intent.metadata,
         });
         if (locationId) {
@@ -95,6 +114,9 @@ export async function POST(request) {
           currency:        intent.currency,
           status:          'FAILED',
           failureReason:   intent.last_payment_error?.message ?? null,
+          customerName:    intent.metadata?.customerName  ?? null,
+          customerEmail:   intent.metadata?.customerEmail ?? intent.receipt_email ?? null,
+          customerPhone:   intent.metadata?.customerPhone ?? null,
           metadata:        intent.metadata,
         });
         if (locationId) {

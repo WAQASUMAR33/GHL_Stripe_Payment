@@ -185,7 +185,23 @@ export default function CheckoutPage() {
       entityId,     // GHL may use this key directly
       entityType,
       contactId,
+      // Customer bio — GHL may send these at top level or inside a contact object
+      contact,
+      email,
+      firstName,
+      lastName,
+      phone,
     } = msg;
+
+    // Resolve customer fields from GHL's contact object or top-level fields
+    const contactObj      = contact ?? {};
+    const customerEmail   = email       || contactObj.email       || null;
+    const customerPhone   = phone       || contactObj.phone       || null;
+    const customerFirst   = firstName   || contactObj.firstName   || null;
+    const customerLast    = lastName    || contactObj.lastName    || null;
+    const customerName    = (customerFirst || customerLast)
+      ? [customerFirst, customerLast].filter(Boolean).join(' ')
+      : null;
 
     const resolvedCurrency   = currency   || 'usd';
     const resolvedEntityId   = entityId   || transactionId || orderId || `ghl-${Date.now()}`;
@@ -204,10 +220,13 @@ export default function CheckoutPage() {
         entityId:   resolvedEntityId,
         entityType: resolvedEntityType,
         metadata: {
-          ghlTransactionId: transactionId ?? null,
-          ghlOrderId:       orderId       ?? null,
-          ghlEntityId:      entityId      ?? null,
-          ghlContactId:     contactId     ?? null,
+          ghlTransactionId: transactionId  ?? null,
+          ghlOrderId:       orderId        ?? null,
+          ghlEntityId:      entityId       ?? null,
+          ghlContactId:     contactId      ?? null,
+          customerName,
+          customerEmail,
+          customerPhone,
         },
       }),
     })

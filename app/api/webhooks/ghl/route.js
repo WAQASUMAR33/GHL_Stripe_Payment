@@ -64,14 +64,26 @@ export async function POST(request) {
           );
         }
 
+        // Extract customer info from GHL's contact object or top-level fields
+        const contact       = data.contact ?? {};
+        const customerName  = (contact.firstName || contact.lastName)
+          ? [contact.firstName, contact.lastName].filter(Boolean).join(' ')
+          : (data.customerName ?? null);
+        const customerEmail = contact.email ?? data.email ?? null;
+        const customerPhone = contact.phone ?? data.phone ?? null;
+
         const intent = await createPaymentIntent({
           amount:          data.amount,
           currency:        data.currency ?? 'usd',
           stripeAccountId: stripeAccount.stripeAccountId,
           metadata: {
             locationId,
-            entityId:   data.entityId,
-            entityType: data.entityType,
+            entityId:      data.entityId,
+            entityType:    data.entityType,
+            ghlContactId:  data.contactId ?? null,
+            customerName,
+            customerEmail,
+            customerPhone,
           },
         });
 

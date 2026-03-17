@@ -9,66 +9,69 @@ datasource db {
 }
 
 model GhlConnection {
-  id               String            @id @default(cuid())
-  locationId       String            @unique @map("location_id")
-  companyId        String?           @map("company_id")
-  userId           String?           @map("user_id")
-  accessToken      String            @map("access_token") @db.Text
-  refreshToken     String            @map("refresh_token") @db.Text
-  expiresAt        DateTime          @map("expires_at")
-  createdAt        DateTime          @default(now()) @map("created_at")
-  updatedAt        DateTime          @updatedAt @map("updated_at")
-  paymentEvents    PaymentEvent[]
-  stripeConnection StripeConnection?
-  webhookLogs      WebhookLog[]
+  id               String               @id @default(cuid())
+  locationId       String               @unique @map("location_id")
+  companyId        String?              @map("company_id")
+  userId           String?              @map("user_id")
+  accessToken      String               @map("access_token") @db.Text
+  refreshToken     String               @map("refresh_token") @db.Text
+  expiresAt        DateTime             @map("expires_at")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+  paymentEvents    GhlPaymentEvent[]
+  stripeConnection GhlStripeConnection?
+  webhookLogs      GhlWebhookLog[]
 
   @@map("ghl_connections")
 }
 
-model StripeConnection {
-  id              String         @id @default(cuid())
-  locationId      String         @unique @map("location_id")
-  stripeAccountId String         @unique @map("stripe_account_id")
-  accessToken     String         @map("access_token") @db.Text
-  refreshToken    String?        @map("refresh_token") @db.Text
-  publishableKey  String         @map("publishable_key")
-  livemode        Boolean        @default(false)
-  tokenType       String?        @map("token_type")
+model GhlStripeConnection {
+  id              String            @id @default(cuid())
+  locationId      String            @unique @map("location_id")
+  stripeAccountId String            @unique @map("stripe_account_id")
+  accessToken     String            @map("access_token") @db.Text
+  refreshToken    String?           @map("refresh_token") @db.Text
+  publishableKey  String            @map("publishable_key")
+  livemode        Boolean           @default(false)
+  tokenType       String?           @map("token_type")
   scope           String?
-  createdAt       DateTime       @default(now()) @map("created_at")
-  updatedAt       DateTime       @updatedAt @map("updated_at")
-  paymentEvents   PaymentEvent[]
-  ghlConnection   GhlConnection  @relation(fields: [locationId], references: [locationId], onDelete: Cascade)
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  paymentEvents   GhlPaymentEvent[]
+  ghlConnection   GhlConnection     @relation(fields: [locationId], references: [locationId], onDelete: Cascade)
 
-  @@map("stripe_connections")
+  @@map("ghl_stripe_connections")
 }
 
-model PaymentEvent {
-  id               String           @id @default(cuid())
-  locationId       String           @map("location_id")
-  stripeAccountId  String           @map("stripe_account_id")
-  paymentIntentId  String           @map("payment_intent_id")
-  entityId         String?          @map("entity_id")
-  entityType       String?          @map("entity_type")
+model GhlPaymentEvent {
+  id               String              @id @default(cuid())
+  locationId       String              @map("location_id")
+  stripeAccountId  String              @map("stripe_account_id")
+  paymentIntentId  String              @unique @map("payment_intent_id")
+  entityId         String?             @map("entity_id")
+  entityType       String?             @map("entity_type")
   amount           Int
-  currency         String           @default("usd")
+  currency         String              @default("usd")
   status           PaymentStatus
-  failureReason    String?          @map("failure_reason") @db.Text
-  refundedAmount   Int              @default(0) @map("refunded_amount")
-  metadata         String?          @db.LongText
-  createdAt        DateTime         @default(now()) @map("created_at")
-  updatedAt        DateTime         @updatedAt @map("updated_at")
-  ghlConnection    GhlConnection    @relation(fields: [locationId], references: [locationId])
-  stripeConnection StripeConnection @relation(fields: [stripeAccountId], references: [stripeAccountId])
+  failureReason    String?             @map("failure_reason") @db.Text
+  refundedAmount   Int                 @default(0) @map("refunded_amount")
+  customerName     String?             @map("customer_name")
+  customerEmail    String?             @map("customer_email")
+  customerPhone    String?             @map("customer_phone")
+  metadata         String?             @db.LongText
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+  ghlConnection    GhlConnection       @relation(fields: [locationId], references: [locationId])
+  stripeConnection GhlStripeConnection @relation(fields: [stripeAccountId], references: [stripeAccountId])
 
   @@index([locationId])
   @@index([paymentIntentId])
   @@index([status])
-  @@index([stripeAccountId], map: "payment_events_stripe_account_id_fkey")
-  @@map("payment_events")
+  @@index([stripeAccountId], map: "ghl_payment_events_stripe_account_id_fkey")
+  @@map("ghl_payment_events")
 }
 
-model WebhookLog {
+model GhlWebhookLog {
   id            String         @id @default(cuid())
   source        WebhookSource
   eventId       String         @unique @map("event_id")
@@ -83,7 +86,7 @@ model WebhookLog {
 
   @@index([source, eventType])
   @@index([locationId])
-  @@map("webhook_logs")
+  @@map("ghl_webhook_logs")
 }
 
 enum PaymentStatus {

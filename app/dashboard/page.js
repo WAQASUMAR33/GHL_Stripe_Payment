@@ -29,6 +29,18 @@ export default function DashboardPage() {
   const [providerResult, setProviderResult]   = useState(null);
   const [providerLoading, setProviderLoading] = useState(false);
 
+  // ── Products state ────────────────────────────────────────────────────────
+  const [products, setProducts]               = useState([]);
+  const [prodLoading, setProdLoading]         = useState(false);
+  const [prodHasMore, setProdHasMore]         = useState(false);
+  const [prodCursor, setProdCursor]           = useState(null);
+  const [prodError, setProdError]             = useState('');
+  const [prodForm, setProdForm]               = useState({ name: '', description: '', price: '', currency: 'usd', type: 'one_time', interval: 'month' });
+  const [prodFormOpen, setProdFormOpen]       = useState(false);
+  const [prodSaving, setProdSaving]           = useState(false);
+  const [editProduct, setEditProduct]         = useState(null); // { id, name, description }
+  const [editSaving, setEditSaving]           = useState(false);
+
   // ── Read query params on mount ────────────────────────────────────────────
   useEffect(() => {
     setOrigin(process.env.NEXT_PUBLIC_APP_URL || window.location.origin);
@@ -92,6 +104,100 @@ export default function DashboardPage() {
       fetchTransactions(locationId, null);
     }
   }, [tab, locationId, fetchTransactions]);
+
+  const fetchProducts = useCallback(async (locId, cursor = null) => {
+    if (!locId) return;
+    setProdLoading(true);
+    setProdError('');
+    try {
+      const url = `/api/products?locationId=${locId}&limit=20${cursor ? `&startingAfter=${cursor}` : ''}`;
+      const r = await fetch(url);
+      const d = await r.json();
+      if (!r.ok) { setProdError(d.error ?? 'Failed to load products'); return; }
+      if (cursor) {
+        setProducts(prev => [...prev, ...(d.products ?? [])]);
+      } else {
+        setProducts(d.products ?? []);
+      }
+      setProdHasMore(d.hasMore ?? false);
+      setProdCursor(d.nextCursor ?? null);
+    } catch (e) {
+      setProdError(e.message);
+    } finally {
+      setProdLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'products' && locationId) {
+      setProdCursor(null);
+      fetchProducts(locationId, null);
+    }
+  }, [tab, locationId, fetchProducts]);
+
+  async function createProduct() {
+    if (!prodForm.name || !prodForm.price) { setProdError('Name and price are required.'); return; }
+    setProdSaving(true);
+    setProdError('');
+    try {
+      const body = {
+        locationId,
+        name:        prodForm.name,
+        description: prodForm.description || undefined,
+        price:       Math.round(parseFloat(prodForm.price) * 100),
+        currency:    prodForm.currency,
+        ...(prodForm.type === 'recurring' ? { recurring: { interval: prodForm.interval } } : {}),
+      };
+      const r = await fetch('/api/products', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok) { setProdError(d.error ?? 'Failed to create product'); return; }
+      setProdFormOpen(false);
+      setProdForm({ name: '', description: '', price: '', currency: 'usd', type: 'one_time', interval: 'month' });
+      fetchProducts(locationId, null);
+    } catch (e) {
+      setProdError(e.message);
+    } finally {
+      setProdSaving(false);
+    }
+  }
+
+  async function saveEditProduct() {
+    if (!editProduct?.name) { setProdError('Name is required.'); return; }
+    setEditSaving(true);
+    setProdError('');
+    try {
+      const r = await fetch(`/api/products/${editProduct.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ locationId, name: editProduct.name, description: editProduct.description }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setProdError(d.error ?? 'Failed to update product'); return; }
+      setEditProduct(null);
+      fetchProducts(locationId, null);
+    } catch (e) {
+      setProdError(e.message);
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  async function archiveProduct(productId, name) {
+    if (!confirm(`Archive "${name}"? It will no longer be available for new purchases.`)) return;
+    setProdError('');
+    try {
+      const r = await fetch(`/api/products/${productId}`, {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ locationId }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setProdError(d.error ?? 'Failed to archive product'); return; }
+      fetchProducts(locationId, null);
+    } catch (e) {
+      setProdError(e.message);
+    }
+  }
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
@@ -241,6 +347,7 @@ export default function DashboardPage() {
           <p>GHL + Stripe Connect</p>
           <div className={`nav-item ${tab === 'dashboard'     ? 'active' : ''}`} onClick={() => setTab('dashboard')}>Dashboard</div>
           <div className={`nav-item ${tab === 'transactions'  ? 'active' : ''}`} onClick={() => setTab('transactions')}>Transactions</div>
+          <div className={`nav-item ${tab === 'products'      ? 'active' : ''}`} onClick={() => setTab('products')}>Products</div>
           <div className={`nav-item ${tab === 'settings'      ? 'active' : ''}`} onClick={() => setTab('settings')}>Settings</div>
         </div>
 
@@ -448,8 +555,8 @@ export default function DashboardPage() {
                     <thead>
                       <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
                         <th style={{ padding: '10px 24px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Date</th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Customer</th>
                         <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Payment Intent</th>
-                        <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Description</th>
                         <th style={{ padding: '10px 16px', textAlign: 'right', color: '#6b7280', fontWeight: 600 }}>Amount</th>
                         <th style={{ padding: '10px 24px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Status</th>
                       </tr>
@@ -464,10 +571,20 @@ export default function DashboardPage() {
                         }[tx.status] ?? 'gray';
                         return (
                           <tr key={tx.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                            <td style={{ padding: '12px 24px', color: '#475569' }}>{new Date(tx.created * 1000).toLocaleDateString()}</td>
-                            <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#475569', fontSize: 12 }}>{tx.id}</td>
-                            <td style={{ padding: '12px 16px', color: '#475569' }}>{tx.description ?? tx.entityType ?? '—'}</td>
-                            <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>
+                            <td style={{ padding: '12px 24px', color: '#475569', whiteSpace: 'nowrap' }}>{new Date(tx.created * 1000).toLocaleDateString()}</td>
+                            <td style={{ padding: '12px 16px' }}>
+                              {tx.customerName || tx.customerEmail || tx.customerPhone ? (
+                                <div>
+                                  {tx.customerName  && <div style={{ fontWeight: 600, color: '#1a1a2e' }}>{tx.customerName}</div>}
+                                  {tx.customerEmail && <div style={{ fontSize: 12, color: '#4f46e5' }}>{tx.customerEmail}</div>}
+                                  {tx.customerPhone && <div style={{ fontSize: 12, color: '#6b7280' }}>{tx.customerPhone}</div>}
+                                </div>
+                              ) : (
+                                <span style={{ color: '#9ca3af' }}>—</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#475569', fontSize: 11 }}>{tx.id}</td>
+                            <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>
                               {new Intl.NumberFormat('en-US', { style: 'currency', currency: tx.currency ?? 'usd' }).format(tx.amount / 100)}
                             </td>
                             <td style={{ padding: '12px 24px' }}>
@@ -488,6 +605,190 @@ export default function DashboardPage() {
                   </>
                 )}
               </div>
+            )}
+          </>}
+
+          {/* ── Products Tab ─────────────────────────────────────────────── */}
+          {tab === 'products' && <>
+            <h1 className="page-title">Products</h1>
+            <p className="page-sub">Manage your Stripe products and prices for this location.</p>
+
+            {!locationId && <div className="alert alert-error">Enter a Location ID on the Dashboard tab first.</div>}
+
+            {prodError && <div className="alert alert-error">{prodError}</div>}
+
+            {locationId && (
+              <>
+                {/* Create Product Form */}
+                <div className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: prodFormOpen ? 20 : 0 }}>
+                    <span style={{ fontWeight: 600, fontSize: 15 }}>Create New Product</span>
+                    <button className="btn btn-primary" style={{ padding: '8px 16px', fontSize: 13 }}
+                      onClick={() => { setProdFormOpen(v => !v); setProdError(''); }}>
+                      {prodFormOpen ? 'Cancel' : '+ New Product'}
+                    </button>
+                  </div>
+
+                  {prodFormOpen && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                        <div>
+                          <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', display: 'block', marginBottom: 6 }}>Product Name *</label>
+                          <input type="text" placeholder="e.g. Monthly Subscription"
+                            value={prodForm.name}
+                            onChange={e => setProdForm(p => ({ ...p, name: e.target.value }))}
+                            style={{ width: '100%', padding: '10px 14px', border: '1.5px solid #e2e8f0', borderRadius: 8, fontSize: 14, outline: 'none' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', display: 'block', marginBottom: 6 }}>Description</label>
+                          <input type="text" placeholder="Optional description"
+                            value={prodForm.description}
+                            onChange={e => setProdForm(p => ({ ...p, description: e.target.value }))}
+                            style={{ width: '100%', padding: '10px 14px', border: '1.5px solid #e2e8f0', borderRadius: 8, fontSize: 14, outline: 'none' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', display: 'block', marginBottom: 6 }}>Price *</label>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <input type="number" min="0" step="0.01" placeholder="9.99"
+                              value={prodForm.price}
+                              onChange={e => setProdForm(p => ({ ...p, price: e.target.value }))}
+                              style={{ flex: 1, padding: '10px 14px', border: '1.5px solid #e2e8f0', borderRadius: 8, fontSize: 14, outline: 'none' }}
+                            />
+                            <select value={prodForm.currency} onChange={e => setProdForm(p => ({ ...p, currency: e.target.value }))}
+                              style={{ padding: '10px 12px', border: '1.5px solid #e2e8f0', borderRadius: 8, fontSize: 14, background: '#fff' }}>
+                              {['usd','eur','gbp','cad','aud','jpy','inr','mxn','brl'].map(c => (
+                                <option key={c} value={c}>{c.toUpperCase()}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', display: 'block', marginBottom: 6 }}>Billing Type</label>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <select value={prodForm.type} onChange={e => setProdForm(p => ({ ...p, type: e.target.value }))}
+                              style={{ flex: 1, padding: '10px 12px', border: '1.5px solid #e2e8f0', borderRadius: 8, fontSize: 14, background: '#fff' }}>
+                              <option value="one_time">One-time</option>
+                              <option value="recurring">Recurring</option>
+                            </select>
+                            {prodForm.type === 'recurring' && (
+                              <select value={prodForm.interval} onChange={e => setProdForm(p => ({ ...p, interval: e.target.value }))}
+                                style={{ flex: 1, padding: '10px 12px', border: '1.5px solid #e2e8f0', borderRadius: 8, fontSize: 14, background: '#fff' }}>
+                                <option value="day">Daily</option>
+                                <option value="week">Weekly</option>
+                                <option value="month">Monthly</option>
+                                <option value="year">Yearly</option>
+                              </select>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <button className="btn btn-primary" onClick={createProduct} disabled={prodSaving}>
+                          {prodSaving ? 'Creating…' : 'Create Product'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Products List */}
+                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px 16px' }}>
+                    <span style={{ fontWeight: 600, fontSize: 15 }}>Products</span>
+                    <button className="btn btn-secondary" onClick={() => { setProdCursor(null); fetchProducts(locationId, null); }} disabled={prodLoading} style={{ padding: '6px 14px', fontSize: 13 }}>
+                      {prodLoading ? 'Loading…' : 'Refresh'}
+                    </button>
+                  </div>
+                  {prodLoading && products.length === 0 && <p style={{ padding: '0 24px 20px', color: '#6b7280', fontSize: 14 }}>Loading products…</p>}
+                  {!prodLoading && products.length === 0 && <p style={{ padding: '0 24px 24px', color: '#6b7280', fontSize: 14 }}>No products yet. Create one above.</p>}
+
+                  {products.length > 0 && (
+                    <>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                            <th style={{ padding: '10px 24px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Product</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Stripe ID</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'right', color: '#6b7280', fontWeight: 600 }}>Price</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Billing</th>
+                            <th style={{ padding: '10px 24px', textAlign: 'left', color: '#6b7280', fontWeight: 600 }}>Created</th>
+                            <th style={{ padding: '10px 24px', textAlign: 'right', color: '#6b7280', fontWeight: 600 }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {products.map(prod => {
+                            const dp = prod.default_price;
+                            const priceLabel = dp
+                              ? new Intl.NumberFormat('en-US', { style: 'currency', currency: dp.currency ?? 'usd' }).format((dp.unit_amount ?? 0) / 100)
+                              : '—';
+                            const billingLabel = dp?.recurring
+                              ? `/ ${dp.recurring.interval_count > 1 ? dp.recurring.interval_count + ' ' : ''}${dp.recurring.interval}`
+                              : 'one-time';
+                            const isEditing = editProduct?.id === prod.id;
+                            return (
+                              <tr key={prod.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                <td style={{ padding: '12px 24px' }}>
+                                  {isEditing ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                      <input value={editProduct.name} onChange={e => setEditProduct(p => ({ ...p, name: e.target.value }))}
+                                        style={{ padding: '6px 10px', border: '1.5px solid #4f46e5', borderRadius: 6, fontSize: 13, width: '100%' }} />
+                                      <input value={editProduct.description ?? ''} onChange={e => setEditProduct(p => ({ ...p, description: e.target.value }))}
+                                        placeholder="Description" style={{ padding: '6px 10px', border: '1.5px solid #e2e8f0', borderRadius: 6, fontSize: 12, width: '100%' }} />
+                                    </div>
+                                  ) : (
+                                    <div>
+                                      <div style={{ fontWeight: 600, color: '#1a1a2e' }}>{prod.name}</div>
+                                      {prod.description && <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{prod.description}</div>}
+                                    </div>
+                                  )}
+                                </td>
+                                <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#475569', fontSize: 11 }}>{prod.id}</td>
+                                <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>{priceLabel}</td>
+                                <td style={{ padding: '12px 16px' }}>
+                                  <span className={`badge ${dp?.recurring ? 'yellow' : 'gray'}`}>{billingLabel}</span>
+                                </td>
+                                <td style={{ padding: '12px 24px', color: '#475569' }}>{new Date(prod.created * 1000).toLocaleDateString()}</td>
+                                <td style={{ padding: '12px 24px', textAlign: 'right' }}>
+                                  {isEditing ? (
+                                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                      <button className="btn btn-primary" style={{ padding: '5px 12px', fontSize: 12 }} onClick={saveEditProduct} disabled={editSaving}>
+                                        {editSaving ? 'Saving…' : 'Save'}
+                                      </button>
+                                      <button className="btn btn-secondary" style={{ padding: '5px 12px', fontSize: 12 }} onClick={() => setEditProduct(null)}>
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                      <button className="btn btn-secondary" style={{ padding: '5px 12px', fontSize: 12 }}
+                                        onClick={() => setEditProduct({ id: prod.id, name: prod.name, description: prod.description ?? '' })}>
+                                        Edit
+                                      </button>
+                                      <button className="btn btn-danger" style={{ padding: '5px 12px', fontSize: 12 }}
+                                        onClick={() => archiveProduct(prod.id, prod.name)}>
+                                        Archive
+                                      </button>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                      {prodHasMore && (
+                        <div style={{ padding: '16px 24px', borderTop: '1px solid #f1f5f9', textAlign: 'center' }}>
+                          <button className="btn btn-secondary" onClick={() => fetchProducts(locationId, prodCursor)} disabled={prodLoading}>
+                            {prodLoading ? 'Loading…' : 'Load More'}
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </>
             )}
           </>}
 
