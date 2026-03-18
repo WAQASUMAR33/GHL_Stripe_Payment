@@ -89,10 +89,11 @@ export async function POST(request) {
           customerPhone,
           metadata:        intent.metadata,
         });
-        if (locationId) {
+        const entityId = intent.metadata?.entityId ?? null;
+        if (locationId && entityId) {
           try {
             await postPaymentUpdateToGHL(locationId, {
-              entityId:              intent.metadata?.entityId,
+              entityId,
               entityType:            intent.metadata?.entityType ?? 'invoice',
               externalTransactionId: intent.id,
               amount:                intent.amount,
@@ -105,6 +106,8 @@ export async function POST(request) {
               JSON.stringify(ghlErr.response?.data ?? ghlErr.message)
             );
           }
+        } else {
+          console.warn(`[Stripe Webhook] Skipping GHL notification — locationId=${locationId} entityId=${entityId}`);
         }
         break;
       }
@@ -126,10 +129,11 @@ export async function POST(request) {
           customerPhone:   intent.metadata?.customerPhone ?? null,
           metadata:        intent.metadata,
         });
-        if (locationId) {
+        const entityIdFailed = intent.metadata?.entityId ?? null;
+        if (locationId && entityIdFailed) {
           try {
             await postPaymentUpdateToGHL(locationId, {
-              entityId:              intent.metadata?.entityId,
+              entityId:              entityIdFailed,
               entityType:            intent.metadata?.entityType ?? 'invoice',
               externalTransactionId: intent.id,
               amount:                intent.amount,
