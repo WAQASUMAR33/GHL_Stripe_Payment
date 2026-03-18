@@ -365,6 +365,9 @@ export async function POST(request) {
         await updateWebhookLog(eventId, 'SKIPPED');
         return NextResponse.json({ received: true });
     }
+
+    // Fallback for any case that used `break` (SKIPPED branches)
+    return NextResponse.json({ received: true });
   } catch (err) {
     console.error(`[GHL Webhook] Error handling ${type}:`, err.message);
     console.error(`[GHL Webhook] Stack:`, err.stack);
