@@ -20,7 +20,8 @@ import {
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function postToParent(msg) {
-  window.parent.postMessage(msg, '*');
+  // GHL expects all iframe messages as JSON strings
+  window.parent.postMessage(JSON.stringify(msg), '*');
 }
 
 function reportHeight() {
