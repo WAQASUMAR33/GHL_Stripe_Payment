@@ -195,6 +195,7 @@ export default function CheckoutPage() {
   const initPayment = useCallback((msg) => {
     const {
       publishableKey,
+      clientSecret,   // GHL may pass the clientSecret from PAYMENT_PROVIDER_CHARGE response
       amount,
       currency,
       locationId,
@@ -225,6 +226,17 @@ export default function CheckoutPage() {
     const resolvedEntityId   = entityId    || transactionId || orderId || `ghl-${Date.now()}`;
     const resolvedEntityType = entityType  || (priceId ? 'transaction' : 'transaction');
     const amountCents        = amount ? Math.round(Number(amount) * 100) : undefined;
+
+    // If GHL already passed a clientSecret from PAYMENT_PROVIDER_CHARGE, use it directly.
+    // This ensures we use the same PI that GHL's transaction is linked to.
+    if (clientSecret && publishableKey) {
+      addLog(`using GHL-provided clientSecret directly`);
+      setMode('payment');
+      setClientSecret(clientSecret);
+      setStripePromise(loadStripe(publishableKey, { stripeAccount: undefined }));
+      setReady(true);
+      return;
+    }
 
     addLog(`calling create-intent: priceId=${priceId ?? 'none'} amount=${amountCents} ${resolvedCurrency} locationId=${locationId}`);
 
@@ -296,7 +308,7 @@ export default function CheckoutPage() {
       clearInterval(readyInterval);
       initDataRef.current = msg;
       addLog(`payment_initiate_props keys: ${Object.keys(msg).join(', ')}`);
-      addLog(`payment_initiate_props: amount=${msg.amount} currency=${msg.currency} priceId=${msg.priceId ?? 'none'} entityType=${msg.entityType ?? 'none'}`);
+      addLog(`payment_initiate_props: amount=${msg.amount} currency=${msg.currency} clientSecret=${msg.clientSecret ? 'YES' : 'NO'} priceId=${msg.priceId ?? 'none'}`);
       console.log('[checkout] full payment_initiate_props:', JSON.stringify(msg));
       initPayment(msg);
     }
