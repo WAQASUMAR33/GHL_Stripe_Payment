@@ -2,24 +2,13 @@
  * /checkout
  * ---------------------------------------------------------------------------
  * GHL custom payment provider checkout iframe.
- *
- * Flow:
- *  1. Page loads → sends custom_provider_ready to parent (GHL) repeatedly
- *     until GHL responds (guards against race where parent isn't ready yet)
- *  2. GHL sends payment_initiate_props with amount, currency, publishableKey, etc.
- *  3. We call /api/payments/create-intent to get a Stripe clientSecret
- *  4. Customer completes payment via Stripe Elements
- *  5. On success → send custom_element_success_response { chargeId: PI_ID }
- *  6. On failure → send custom_element_error_response { error: { description } }
- *
- * Embedded inside a GHL order form iframe — no outer card wrapper needed.
- * Height is reported to the parent after each render so GHL can resize the iframe.
+ * Supports both one-time PaymentIntents and recurring Subscriptions.
  * ---------------------------------------------------------------------------
  */
 
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import {
   Elements,
@@ -34,21 +23,39 @@ function postToParent(msg) {
   window.parent.postMessage(msg, '*');
 }
 
-/** Tell GHL how tall our iframe content is so it can resize the frame. */
 function reportHeight() {
   const h = document.documentElement.scrollHeight;
   postToParent({ type: 'set_height', height: h });
 }
 
+/** Map common Stripe decline codes to user-friendly messages. */
+function friendlyError(stripeError) {
+  if (!stripeError) return 'An unexpected error occurred. Please try again.';
+  switch (stripeError.code) {
+    case 'card_declined':          return 'Your card was declined. Please use a different card.';
+    case 'insufficient_funds':     return 'Your card has insufficient funds.';
+    case 'expired_card':           return 'Your card has expired. Please use a different card.';
+    case 'incorrect_cvc':          return 'The security code (CVC) is incorrect. Please check and try again.';
+    case 'incorrect_number':       return 'The card number is incorrect. Please check and try again.';
+    case 'invalid_expiry_month':
+    case 'invalid_expiry_year':    return 'The card expiry date is invalid.';
+    case 'processing_error':       return 'An error occurred while processing your card. Please try again.';
+    case 'blocked':                return 'This transaction has been blocked. Please contact your bank.';
+    case 'do_not_honor':           return 'Your bank declined this transaction. Please contact your bank or use a different card.';
+    case 'fraudulent':             return 'This transaction could not be completed. Please use a different card.';
+    default:                       return stripeError.message || 'Payment failed. Please try again.';
+  }
+}
+
 // ── CheckoutForm ──────────────────────────────────────────────────────────────
 
-function CheckoutForm({ onSuccess, onError }) {
+function CheckoutForm({ mode, subscriptionId, onSuccess, onError }) {
   const stripe   = useStripe();
   const elements = useElements();
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState(null);
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState(null);
+  const [complete, setComplete] = useState(false);
 
-  // Report height after Stripe Elements renders
   useEffect(() => {
     const t = setTimeout(reportHeight, 300);
     return () => clearTimeout(t);
@@ -61,51 +68,87 @@ function CheckoutForm({ onSuccess, onError }) {
     setLoading(true);
     setError(null);
 
-    const { error: stripeError, paymentIntent } = await stripe.confirmPayment({
+    // Submit the Elements form first (validates fields)
+    const { error: submitErr } = await elements.submit();
+    if (submitErr) {
+      setError(friendlyError(submitErr));
+      setLoading(false);
+      return;
+    }
+
+    const { error: confirmErr, paymentIntent } = await stripe.confirmPayment({
       elements,
       confirmParams: { return_url: window.location.href },
       redirect: 'if_required',
     });
 
-    if (stripeError) {
-      setError(stripeError.message);
+    if (confirmErr) {
+      const msg = friendlyError(confirmErr);
+      setError(msg);
       setLoading(false);
-      onError?.(stripeError.message);
-    } else if (paymentIntent?.status === 'succeeded') {
-      setLoading(false);
-      onSuccess?.(paymentIntent.id);
-    } else {
-      setError('Payment did not complete. Please try again.');
-      setLoading(false);
+      onError?.(msg);
+      return;
     }
+
+    if (paymentIntent?.status === 'succeeded') {
+      setComplete(true);
+      setLoading(false);
+      // For subscriptions, pass the subscriptionId as the chargeId so GHL can track it
+      onSuccess?.(subscriptionId ?? paymentIntent.id, mode);
+      return;
+    }
+
+    // Unexpected status
+    const msg = `Payment status: ${paymentIntent?.status ?? 'unknown'}. Please try again.`;
+    setError(msg);
+    setLoading(false);
+    onError?.(msg);
+  }
+
+  if (complete) {
+    return (
+      <div style={{ textAlign: 'center', padding: '24px 0' }}>
+        <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: '#166534' }}>Payment successful!</div>
+        <div style={{ fontSize: 13, color: '#6b7280', marginTop: 6 }}>
+          {mode === 'subscription' ? 'Your subscription is now active.' : 'Your payment has been processed.'}
+        </div>
+      </div>
+    );
   }
 
   return (
     <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <PaymentElement onReady={reportHeight} />
+      <PaymentElement onReady={reportHeight} onChange={() => setError(null)} />
+
       {error && (
-        <div style={{ color: '#dc2626', fontSize: 14, padding: '10px 12px', background: '#fef2f2', borderRadius: 6 }}>
-          {error}
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 14px', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+          <span style={{ fontSize: 16, flexShrink: 0 }}>⚠️</span>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#991b1b', marginBottom: 2 }}>Payment failed</div>
+            <div style={{ fontSize: 13, color: '#b91c1c' }}>{error}</div>
+          </div>
         </div>
       )}
+
       <button
         type="submit"
         disabled={!stripe || loading}
         style={{
-          background: (!stripe || loading) ? '#a5b4fc' : '#4f46e5',
-          color: '#fff',
-          border: 'none',
-          padding: '14px 0',
-          borderRadius: 8,
-          fontSize: 15,
-          fontWeight: 600,
-          cursor: (!stripe || loading) ? 'not-allowed' : 'pointer',
-          transition: 'background .2s',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 8,
-          width: '100%',
+          background:    loading ? '#a5b4fc' : '#4f46e5',
+          color:         '#fff',
+          border:        'none',
+          padding:       '14px 0',
+          borderRadius:  8,
+          fontSize:      15,
+          fontWeight:    600,
+          cursor:        loading ? 'not-allowed' : 'pointer',
+          transition:    'background .2s',
+          display:       'flex',
+          alignItems:    'center',
+          justifyContent:'center',
+          gap:           8,
+          width:         '100%',
         }}
       >
         {loading ? (
@@ -114,7 +157,7 @@ function CheckoutForm({ onSuccess, onError }) {
             Processing…
           </>
         ) : (
-          <>🔒 Pay Now</>
+          <>{mode === 'subscription' ? '🔒 Subscribe Now' : '🔒 Pay Now'}</>
         )}
       </button>
     </form>
@@ -124,11 +167,13 @@ function CheckoutForm({ onSuccess, onError }) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function CheckoutPage() {
-  const [stripePromise, setStripePromise] = useState(null);
-  const [clientSecret,  setClientSecret]  = useState(null);
-  const [error,         setError]         = useState(null);
-  const [ready,         setReady]         = useState(false);
-  const [debugLog,      setDebugLog]      = useState(['page loaded']);
+  const [stripePromise,   setStripePromise]   = useState(null);
+  const [clientSecret,    setClientSecret]    = useState(null);
+  const [mode,            setMode]            = useState('payment'); // 'payment' | 'subscription'
+  const [subscriptionId,  setSubscriptionId]  = useState(null);
+  const [pageError,       setPageError]       = useState(null);  // setup/loading errors
+  const [ready,           setReady]           = useState(false);
+  const [debugLog,        setDebugLog]        = useState(['page loaded']);
   const initDataRef = useRef(null);
 
   function addLog(msg) {
@@ -136,12 +181,101 @@ export default function CheckoutPage() {
     setDebugLog((prev) => [...prev.slice(-9), msg]);
   }
 
+  // Allow the user to retry after a setup error (e.g. no Stripe account)
+  function handleRetry() {
+    initDataRef.current = null;
+    setPageError(null);
+    setReady(false);
+    setClientSecret(null);
+    setStripePromise(null);
+    setSubscriptionId(null);
+  }
+
+  const initPayment = useCallback((msg) => {
+    const {
+      publishableKey,
+      amount,
+      currency,
+      locationId,
+      transactionId,
+      orderId,
+      entityId,
+      entityType,
+      contactId,
+      priceId,        // Stripe Price ID for product-based checkout
+      contact,
+      email,
+      firstName,
+      lastName,
+      phone,
+    } = msg;
+
+    // Resolve customer fields
+    const contactObj    = contact ?? {};
+    const customerEmail = email      || contactObj.email     || null;
+    const customerPhone = phone      || contactObj.phone     || null;
+    const customerFirst = firstName  || contactObj.firstName || null;
+    const customerLast  = lastName   || contactObj.lastName  || null;
+    const customerName  = (customerFirst || customerLast)
+      ? [customerFirst, customerLast].filter(Boolean).join(' ')
+      : null;
+
+    const resolvedCurrency   = (currency   || 'usd').toLowerCase();
+    const resolvedEntityId   = entityId    || transactionId || orderId || `ghl-${Date.now()}`;
+    const resolvedEntityType = entityType  || (priceId ? 'transaction' : 'transaction');
+    const amountCents        = amount ? Math.round(Number(amount) * 100) : undefined;
+
+    addLog(`calling create-intent: priceId=${priceId ?? 'none'} amount=${amountCents} ${resolvedCurrency} locationId=${locationId}`);
+
+    fetch('/api/payments/create-intent', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        locationId,
+        ...(priceId    ? { priceId }                        : {}),
+        ...(amountCents ? { amount: amountCents }            : {}),
+        currency:   resolvedCurrency,
+        entityId:   resolvedEntityId,
+        entityType: resolvedEntityType,
+        metadata: {
+          ghlTransactionId: transactionId ?? null,
+          ghlOrderId:       orderId       ?? null,
+          ghlEntityId:      entityId      ?? null,
+          ghlContactId:     contactId     ?? null,
+          customerName,
+          customerEmail,
+          customerPhone,
+        },
+      }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) {
+          addLog(`create-intent error: ${data.error}`);
+          setPageError(data.error);
+          return;
+        }
+        addLog(`create-intent ok — mode=${data.mode}`);
+        setMode(data.mode ?? 'payment');
+        setSubscriptionId(data.subscriptionId ?? null);
+        setClientSecret(data.clientSecret);
+        setStripePromise(
+          loadStripe(publishableKey || data.publishableKey, {
+            ...(data.stripeAccountId ? { stripeAccount: data.stripeAccountId } : {}),
+          })
+        );
+        setReady(true);
+      })
+      .catch((err) => {
+        addLog(`create-intent fetch error: ${err.message}`);
+        setPageError('Could not connect to payment server. Please try again.');
+      });
+  }, []);
+
   useEffect(() => {
-    // ── Report height whenever the DOM changes ──
     const ro = new ResizeObserver(reportHeight);
     ro.observe(document.documentElement);
 
-    // ── Send custom_provider_ready repeatedly until GHL responds ──
     addLog('sending custom_provider_ready…');
     window.parent.postMessage(JSON.stringify({ type: 'custom_provider_ready', loaded: true }), '*');
     const readyInterval = setInterval(() => {
@@ -150,19 +284,17 @@ export default function CheckoutPage() {
       }
     }, 500);
 
-    // ── Listen for payment_initiate_props from GHL ──
     function onMessage(event) {
-      // GHL may send message as a JSON string or a plain object — handle both
       let msg = event.data;
       if (typeof msg === 'string') {
         try { msg = JSON.parse(msg); } catch { return; }
       }
-      addLog(`msg received: type=${msg?.type ?? 'unknown'} origin=${event.origin}`);
+      addLog(`msg received: type=${msg?.type ?? 'unknown'}`);
       if (!msg || msg.type !== 'payment_initiate_props') return;
-      if (initDataRef.current) return; // already handled
+      if (initDataRef.current) return;
       clearInterval(readyInterval);
       initDataRef.current = msg;
-      addLog(`payment_initiate_props: amount=${msg.amount} currency=${msg.currency} locationId=${msg.locationId}`);
+      addLog(`payment_initiate_props: amount=${msg.amount} currency=${msg.currency} priceId=${msg.priceId ?? 'none'}`);
       initPayment(msg);
     }
 
@@ -172,81 +304,10 @@ export default function CheckoutPage() {
       window.removeEventListener('message', onMessage);
       ro.disconnect();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [initPayment]);
 
-  function initPayment(msg) {
-    const {
-      publishableKey,
-      amount,       // GHL sends as decimal: 100.00 = $100
-      currency,
-      locationId,
-      transactionId,
-      orderId,
-      entityId,     // GHL may use this key directly
-      entityType,
-      contactId,
-      // Customer bio — GHL may send these at top level or inside a contact object
-      contact,
-      email,
-      firstName,
-      lastName,
-      phone,
-    } = msg;
-
-    // Resolve customer fields from GHL's contact object or top-level fields
-    const contactObj      = contact ?? {};
-    const customerEmail   = email       || contactObj.email       || null;
-    const customerPhone   = phone       || contactObj.phone       || null;
-    const customerFirst   = firstName   || contactObj.firstName   || null;
-    const customerLast    = lastName    || contactObj.lastName    || null;
-    const customerName    = (customerFirst || customerLast)
-      ? [customerFirst, customerLast].filter(Boolean).join(' ')
-      : null;
-
-    const resolvedCurrency   = currency   || 'usd';
-    const resolvedEntityId   = entityId   || transactionId || orderId || `ghl-${Date.now()}`;
-    const resolvedEntityType = entityType || 'transaction';
-    const amountCents        = Math.round(Number(amount) * 100);
-
-    addLog(`calling create-intent: ${amountCents} ${resolvedCurrency} locationId=${locationId}`);
-
-    fetch('/api/payments/create-intent', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        locationId,
-        amount:     amountCents,
-        currency:   resolvedCurrency.toLowerCase(),
-        entityId:   resolvedEntityId,
-        entityType: resolvedEntityType,
-        metadata: {
-          ghlTransactionId: transactionId  ?? null,
-          ghlOrderId:       orderId        ?? null,
-          ghlEntityId:      entityId       ?? null,
-          ghlContactId:     contactId      ?? null,
-          customerName,
-          customerEmail,
-          customerPhone,
-        },
-      }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) { addLog(`create-intent error: ${data.error}`); setError(data.error); return; }
-        addLog(`create-intent ok, loading Stripe…`);
-        setClientSecret(data.clientSecret);
-        setStripePromise(
-          loadStripe(publishableKey || data.publishableKey, {
-            ...(data.stripeAccountId ? { stripeAccount: data.stripeAccountId } : {}),
-          })
-        );
-        setReady(true);
-      })
-      .catch((err) => { addLog(`create-intent fetch error: ${err.message}`); setError(err.message); });
-  }
-
-  function handleSuccess(paymentIntentId) {
-    postToParent({ type: 'custom_element_success_response', chargeId: paymentIntentId });
+  function handleSuccess(chargeId, paymentMode) {
+    postToParent({ type: 'custom_element_success_response', chargeId });
   }
 
   function handleError(description) {
@@ -280,25 +341,11 @@ export default function CheckoutPage() {
           text-align: center;
           margin-bottom: 24px;
         }
-        .checkout-header .lock-icon {
-          font-size: 22px;
-          margin-bottom: 6px;
-        }
-        .checkout-header h2 {
-          font-size: 18px;
-          font-weight: 700;
-          color: #111827;
-          margin-bottom: 4px;
-        }
-        .checkout-header p {
-          font-size: 13px;
-          color: #6b7280;
-        }
-        .divider {
-          border: none;
-          border-top: 1px solid #e5e7eb;
-          margin: 20px 0;
-        }
+        .checkout-header .lock-icon { font-size: 22px; margin-bottom: 6px; }
+        .checkout-header h2 { font-size: 18px; font-weight: 700; color: #111827; margin-bottom: 4px; }
+        .checkout-header p  { font-size: 13px; color: #6b7280; }
+        .divider { border: none; border-top: 1px solid #e5e7eb; margin: 20px 0; }
+        @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
 
       <div className="checkout-wrapper">
@@ -306,28 +353,53 @@ export default function CheckoutPage() {
           <div className="checkout-header">
             <div className="lock-icon">🔒</div>
             <h2>Secure Payment</h2>
-            <p>Your payment info is encrypted and secure</p>
+            <p>{mode === 'subscription' ? 'Set up your recurring subscription' : 'Your payment info is encrypted and secure'}</p>
           </div>
 
           <hr className="divider" />
 
-          {error && (
-            <div style={{ color: '#dc2626', fontSize: 14, padding: '10px 12px', background: '#fef2f2', borderRadius: 8, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span>⚠️</span> {error}
+          {/* Setup / loading error with retry */}
+          {pageError && (
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '16px', marginBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 12 }}>
+                <span style={{ fontSize: 18, flexShrink: 0 }}>⚠️</span>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#991b1b', marginBottom: 2 }}>Unable to load payment</div>
+                  <div style={{ fontSize: 13, color: '#b91c1c' }}>{pageError}</div>
+                </div>
+              </div>
+              <button
+                onClick={handleRetry}
+                style={{ width: '100%', padding: '10px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Try Again
+              </button>
             </div>
           )}
 
-          {!error && !ready && (
+          {/* Loading spinner — only shown when no error and not ready */}
+          {!pageError && !ready && (
             <div style={{ textAlign: 'center', padding: '32px 0' }}>
               <div style={{ display: 'inline-block', width: 28, height: 28, border: '3px solid #e5e7eb', borderTopColor: '#4f46e5', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
               <p style={{ marginTop: 12, color: '#6b7280', fontSize: 14 }}>Loading payment form…</p>
-              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
             </div>
           )}
 
+          {/* Stripe Elements form */}
           {ready && clientSecret && stripePromise && (
-            <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: 'stripe', variables: { borderRadius: '8px', colorPrimary: '#4f46e5' } } }}>
-              <CheckoutForm onSuccess={handleSuccess} onError={handleError} />
+            <Elements
+              stripe={stripePromise}
+              options={{
+                clientSecret,
+                appearance: { theme: 'stripe', variables: { borderRadius: '8px', colorPrimary: '#4f46e5' } },
+              }}
+            >
+              <CheckoutForm
+                mode={mode}
+                subscriptionId={subscriptionId}
+                onSuccess={handleSuccess}
+                onError={handleError}
+              />
             </Elements>
           )}
 
