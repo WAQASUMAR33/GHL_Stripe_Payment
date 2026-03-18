@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { getPaymentIntent, createRefund } from '@/lib/stripe';
-import { getStripeAccount } from '@/lib/tokenStore';
+import { getStripeAccount, getPaymentEventByIntentId } from '@/lib/tokenStore';
 
 // ── POST: GHL queryUrl ────────────────────────────────────────────────────────
 
@@ -35,7 +35,24 @@ export async function POST(request) {
     case 'verify': {
       const { chargeId } = body;
       if (!chargeId) return NextResponse.json({ failed: true });
-      const stripeAccount = await getStripeAccount(locationId);
+
+      // GHL doesn't always send locationId — look it up from our DB using the PI ID
+      let resolvedLocationId = locationId;
+      let stripeAccountId;
+      if (!resolvedLocationId) {
+        const event = await getPaymentEventByIntentId(chargeId);
+        resolvedLocationId = event?.locationId ?? null;
+        stripeAccountId    = event?.stripeAccountId ?? null;
+      }
+
+      let stripeAccount = resolvedLocationId ? await getStripeAccount(resolvedLocationId) : null;
+      if (!stripeAccount && stripeAccountId) {
+        // Minimal fallback — just need the stripeAccountId to query Stripe
+        stripeAccount = { stripeAccountId };
+      }
+
+      console.log(`[queryUrl/verify] chargeId=${chargeId} locationId=${resolvedLocationId} stripeAccountId=${stripeAccount?.stripeAccountId}`);
+
       if (!stripeAccount) return NextResponse.json({ failed: true });
       try {
         const intent = await getPaymentIntent(chargeId, stripeAccount.stripeAccountId);
