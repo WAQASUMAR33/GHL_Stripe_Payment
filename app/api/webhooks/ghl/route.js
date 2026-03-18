@@ -96,6 +96,9 @@ export async function POST(request) {
           );
         }
 
+        // DEBUG: log full data to understand recurring product structure
+        console.log('[GHL Webhook] DEBUG PAYMENT_PROVIDER_CHARGE full data:', JSON.stringify(data).slice(0, 1000));
+
         // Extract customer info from GHL's contact object or top-level fields
         const contact       = data.contact ?? {};
         const customerName  = (contact.firstName || contact.lastName)

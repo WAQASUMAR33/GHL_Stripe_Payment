@@ -294,7 +294,9 @@ export default function CheckoutPage() {
       if (initDataRef.current) return;
       clearInterval(readyInterval);
       initDataRef.current = msg;
-      addLog(`payment_initiate_props: amount=${msg.amount} currency=${msg.currency} priceId=${msg.priceId ?? 'none'}`);
+      addLog(`payment_initiate_props keys: ${Object.keys(msg).join(', ')}`);
+      addLog(`payment_initiate_props: amount=${msg.amount} currency=${msg.currency} priceId=${msg.priceId ?? 'none'} entityType=${msg.entityType ?? 'none'}`);
+      console.log('[checkout] full payment_initiate_props:', JSON.stringify(msg));
       initPayment(msg);
     }
 
