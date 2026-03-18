@@ -35,10 +35,16 @@ export async function POST(request) {
   const rawBody   = Buffer.from(await request.arrayBuffer());
   const signature = request.headers.get('x-ghl-signature');
 
-  // Only verify HMAC signature when the header is present.
-  // GHL payment-provider events include it; general marketplace webhooks
-  // (ProductCreate, PriceCreate, etc.) do not send this header.
-  if (GHL_CLIENT_SECRET && signature && !verifyGHLWebhook(rawBody, signature)) {
+  // Peek at the event type before full parse so we know whether to verify.
+  // GHL payment-provider events (PAYMENT_PROVIDER_CHARGE etc.) are signed
+  // with GHL_CLIENT_SECRET. General marketplace webhooks (ProductCreate,
+  // PriceCreate etc.) use a different signing key — skip verification for them.
+  let rawType = '';
+  try { rawType = JSON.parse(rawBody.toString('utf-8'))?.type ?? ''; } catch {}
+
+  const isPaymentEvent = ['PAYMENT_PROVIDER_CHARGE', 'PAYMENT_PROVIDER_REFUND', 'INSTALL', 'UNINSTALL'].includes(rawType);
+
+  if (GHL_CLIENT_SECRET && signature && isPaymentEvent && !verifyGHLWebhook(rawBody, signature)) {
     console.warn('[GHL Webhook] Invalid signature');
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
