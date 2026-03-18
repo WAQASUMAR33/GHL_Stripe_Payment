@@ -21,10 +21,12 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
+  console.log('[queryUrl] RAW body:', JSON.stringify(body));
+
   const { type, apiKey, locationId } = body;
 
   if (!apiKey || apiKey !== process.env.GHL_CLIENT_SECRET) {
-    console.warn('[queryUrl] Invalid apiKey');
+    console.warn('[queryUrl] Invalid apiKey — received:', apiKey, 'expected length:', process.env.GHL_CLIENT_SECRET?.length);
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
