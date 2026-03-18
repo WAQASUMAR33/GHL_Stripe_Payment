@@ -36,7 +36,7 @@ import {
   createSubscription,
   getPrice,
 } from '@/lib/stripe';
-import { getStripeAccount } from '@/lib/tokenStore';
+import { getStripeAccount, upsertPaymentEvent } from '@/lib/tokenStore';
 
 export async function POST(request) {
   let body;
@@ -192,6 +192,26 @@ export async function POST(request) {
   } catch (err) {
     console.error('[create-intent]', err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+
+  // Save to DB immediately so the verify endpoint can look up locationId/stripeAccountId
+  // before payment_intent.succeeded fires (GHL calls verify right after checkout success)
+  try {
+    await upsertPaymentEvent({
+      locationId:      locationId,
+      stripeAccountId: stripeAccount.stripeAccountId,
+      paymentIntentId: intent.id,
+      entityId:        finalEntityId,
+      entityType:      finalEntityType,
+      amount:          amount,
+      currency:        currency,
+      status:          'PENDING',
+      customerName:    metadata.customerName  ?? null,
+      customerEmail:   metadata.customerEmail ?? null,
+      customerPhone:   metadata.customerPhone ?? null,
+    });
+  } catch (dbErr) {
+    console.warn('[create-intent] Failed to pre-save payment event (non-fatal):', dbErr.message);
   }
 
   return NextResponse.json({
