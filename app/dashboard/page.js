@@ -40,6 +40,8 @@ export default function DashboardPage() {
   const [prodSaving, setProdSaving]           = useState(false);
   const [editProduct, setEditProduct]         = useState(null); // { id, name, description }
   const [editSaving, setEditSaving]           = useState(false);
+  const [syncLoading, setSyncLoading]         = useState(false);
+  const [syncResult, setSyncResult]           = useState(null);
 
   // ── Read query params on mount ────────────────────────────────────────────
   useEffect(() => {
@@ -180,6 +182,26 @@ export default function DashboardPage() {
       setProdError(e.message);
     } finally {
       setEditSaving(false);
+    }
+  }
+
+  async function syncFromGHL() {
+    setSyncLoading(true);
+    setSyncResult(null);
+    setProdError('');
+    try {
+      const r = await fetch('/api/products/sync', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ locationId }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setProdError(d.error ?? 'Sync failed'); return; }
+      setSyncResult(d);
+      if (d.synced > 0) fetchProducts(locationId, null);
+    } catch (e) {
+      setProdError(e.message);
+    } finally {
+      setSyncLoading(false);
     }
   }
 
@@ -616,9 +638,26 @@ export default function DashboardPage() {
             {!locationId && <div className="alert alert-error">Enter a Location ID on the Dashboard tab first.</div>}
 
             {prodError && <div className="alert alert-error">{prodError}</div>}
+            {syncResult && (
+              <div className="alert alert-success">
+                Sync complete — {syncResult.synced} created, {syncResult.skipped} skipped
+                {syncResult.errors?.length > 0 && ` (${syncResult.errors.length} errors: ${syncResult.errors.join('; ')})`}
+              </div>
+            )}
 
             {locationId && (
               <>
+                {/* Sync from GHL */}
+                <div className="card" style={{ padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>Sync Products from GHL</div>
+                    <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>Import your GHL product catalog into Stripe. Skips products that already exist by name.</div>
+                  </div>
+                  <button className="btn btn-secondary" onClick={syncFromGHL} disabled={syncLoading} style={{ flexShrink: 0 }}>
+                    {syncLoading ? 'Syncing…' : 'Sync from GHL'}
+                  </button>
+                </div>
+
                 {/* Create Product Form */}
                 <div className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: prodFormOpen ? 20 : 0 }}>

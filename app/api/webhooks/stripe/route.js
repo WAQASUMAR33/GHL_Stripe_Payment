@@ -90,14 +90,21 @@ export async function POST(request) {
           metadata:        intent.metadata,
         });
         if (locationId) {
-          await postPaymentUpdateToGHL(locationId, {
-            entityId:              intent.metadata?.entityId,
-            entityType:            intent.metadata?.entityType ?? 'invoice',
-            externalTransactionId: intent.id,
-            amount:                intent.amount,
-            currency:              intent.currency,
-            status:                'success',
-          });
+          try {
+            await postPaymentUpdateToGHL(locationId, {
+              entityId:              intent.metadata?.entityId,
+              entityType:            intent.metadata?.entityType ?? 'invoice',
+              externalTransactionId: intent.id,
+              amount:                intent.amount,
+              currency:              intent.currency,
+              status:                'success',
+            });
+          } catch (ghlErr) {
+            console.error('[Stripe Webhook] GHL payment update failed (non-fatal):',
+              ghlErr.response?.status,
+              JSON.stringify(ghlErr.response?.data ?? ghlErr.message)
+            );
+          }
         }
         break;
       }
@@ -120,14 +127,21 @@ export async function POST(request) {
           metadata:        intent.metadata,
         });
         if (locationId) {
-          await postPaymentUpdateToGHL(locationId, {
-            entityId:              intent.metadata?.entityId,
-            entityType:            intent.metadata?.entityType ?? 'invoice',
-            externalTransactionId: intent.id,
-            amount:                intent.amount,
-            currency:              intent.currency,
-            status:                'failed',
-          });
+          try {
+            await postPaymentUpdateToGHL(locationId, {
+              entityId:              intent.metadata?.entityId,
+              entityType:            intent.metadata?.entityType ?? 'invoice',
+              externalTransactionId: intent.id,
+              amount:                intent.amount,
+              currency:              intent.currency,
+              status:                'failed',
+            });
+          } catch (ghlErr) {
+            console.error('[Stripe Webhook] GHL payment_failed update failed (non-fatal):',
+              ghlErr.response?.status,
+              JSON.stringify(ghlErr.response?.data ?? ghlErr.message)
+            );
+          }
         }
         break;
       }
@@ -147,14 +161,21 @@ export async function POST(request) {
           metadata:        charge.metadata,
         });
         if (locationId) {
-          await postPaymentUpdateToGHL(locationId, {
-            entityId:              charge.metadata?.entityId,
-            entityType:            charge.metadata?.entityType ?? 'invoice',
-            externalTransactionId: charge.payment_intent,
-            amount:                charge.amount_refunded,
-            currency:              charge.currency,
-            status:                'refunded',
-          });
+          try {
+            await postPaymentUpdateToGHL(locationId, {
+              entityId:              charge.metadata?.entityId,
+              entityType:            charge.metadata?.entityType ?? 'invoice',
+              externalTransactionId: charge.payment_intent,
+              amount:                charge.amount_refunded,
+              currency:              charge.currency,
+              status:                'refunded',
+            });
+          } catch (ghlErr) {
+            console.error('[Stripe Webhook] GHL refund update failed (non-fatal):',
+              ghlErr.response?.status,
+              JSON.stringify(ghlErr.response?.data ?? ghlErr.message)
+            );
+          }
         }
         break;
       }
@@ -163,11 +184,18 @@ export async function POST(request) {
       case 'customer.subscription.updated': {
         const sub = event.data.object;
         if (locationId) {
-          await postSubscriptionUpdateToGHL(locationId, {
-            externalSubscriptionId: sub.id,
-            status:   sub.status,
-            entityId: sub.metadata?.entityId,
-          });
+          try {
+            await postSubscriptionUpdateToGHL(locationId, {
+              externalSubscriptionId: sub.id,
+              status:   sub.status,
+              entityId: sub.metadata?.entityId,
+            });
+          } catch (ghlErr) {
+            console.error('[Stripe Webhook] GHL subscription update failed (non-fatal):',
+              ghlErr.response?.status,
+              JSON.stringify(ghlErr.response?.data ?? ghlErr.message)
+            );
+          }
         }
         break;
       }
@@ -175,11 +203,18 @@ export async function POST(request) {
       case 'customer.subscription.deleted': {
         const sub = event.data.object;
         if (locationId) {
-          await postSubscriptionUpdateToGHL(locationId, {
-            externalSubscriptionId: sub.id,
-            status:   'canceled',
-            entityId: sub.metadata?.entityId,
-          });
+          try {
+            await postSubscriptionUpdateToGHL(locationId, {
+              externalSubscriptionId: sub.id,
+              status:   'canceled',
+              entityId: sub.metadata?.entityId,
+            });
+          } catch (ghlErr) {
+            console.error('[Stripe Webhook] GHL subscription deleted update failed (non-fatal):',
+              ghlErr.response?.status,
+              JSON.stringify(ghlErr.response?.data ?? ghlErr.message)
+            );
+          }
         }
         break;
       }
