@@ -35,6 +35,13 @@ export async function POST(request) {
   const rawBody   = Buffer.from(await request.arrayBuffer());
   const signature = request.headers.get('x-ghl-signature');
 
+  // ── DEBUG: log all incoming headers and raw body snippet ─────────────────
+  const allHeaders = {};
+  request.headers.forEach((v, k) => { allHeaders[k] = v; });
+  console.log('[GHL Webhook] DEBUG headers:', JSON.stringify(allHeaders));
+  console.log('[GHL Webhook] DEBUG body snippet:', rawBody.toString('utf-8').slice(0, 500));
+  // ─────────────────────────────────────────────────────────────────────────
+
   // Peek at the event type before full parse so we know whether to verify.
   // GHL payment-provider events (PAYMENT_PROVIDER_CHARGE etc.) are signed
   // with GHL_CLIENT_SECRET. General marketplace webhooks (ProductCreate,
@@ -44,8 +51,10 @@ export async function POST(request) {
 
   const isPaymentEvent = ['PAYMENT_PROVIDER_CHARGE', 'PAYMENT_PROVIDER_REFUND', 'INSTALL', 'UNINSTALL'].includes(rawType);
 
+  console.log(`[GHL Webhook] DEBUG type="${rawType}" isPaymentEvent=${isPaymentEvent} hasSignature=${!!signature}`);
+
   if (GHL_CLIENT_SECRET && signature && isPaymentEvent && !verifyGHLWebhook(rawBody, signature)) {
-    console.warn('[GHL Webhook] Invalid signature');
+    console.warn('[GHL Webhook] Invalid signature — expected HMAC mismatch for payment event');
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
 
@@ -53,11 +62,15 @@ export async function POST(request) {
   try {
     payload = JSON.parse(rawBody.toString('utf-8'));
   } catch {
+    console.error('[GHL Webhook] Failed to parse JSON body');
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
   const { type, locationId, data } = payload;
   const eventId = payload.eventId ?? `ghl-${Date.now()}-${Math.random()}`;
+
+  console.log(`[GHL Webhook] DEBUG full payload keys: ${Object.keys(payload).join(', ')}`);
+  console.log(`[GHL Webhook] DEBUG locationId=${locationId} data keys: ${data ? Object.keys(data).join(', ') : 'none'}`);
 
   // Log the incoming event
   await createWebhookLog({
@@ -143,14 +156,23 @@ export async function POST(request) {
 
       // ── GHL Product events → sync to Stripe ───────────────────────────────
       case 'ProductCreate': {
+        console.log('[GHL Webhook] DEBUG ProductCreate — fetching Stripe account for location:', locationId);
         const stripeAccount = await getStripeAccount(locationId);
-        if (!stripeAccount) { await updateWebhookLog(eventId, 'SKIPPED', 'No Stripe account'); break; }
+        if (!stripeAccount) {
+          console.warn('[GHL Webhook] DEBUG ProductCreate — no Stripe account found for location:', locationId);
+          await updateWebhookLog(eventId, 'SKIPPED', 'No Stripe account'); break;
+        }
 
         // GHL may nest product in data or send it at the top level
         const prod = data ?? payload;
+        console.log('[GHL Webhook] DEBUG ProductCreate prod keys:', Object.keys(prod).join(', '));
+        console.log('[GHL Webhook] DEBUG ProductCreate prod sample:', JSON.stringify(prod).slice(0, 400));
         const ghlProductId = prod.id ?? prod._id;
         const name         = prod.name ?? prod.title;
-        if (!name || !ghlProductId) { await updateWebhookLog(eventId, 'SKIPPED', 'Missing product name/id'); break; }
+        if (!name || !ghlProductId) {
+          console.warn('[GHL Webhook] DEBUG ProductCreate — missing name or id. name:', name, 'id:', ghlProductId);
+          await updateWebhookLog(eventId, 'SKIPPED', 'Missing product name/id'); break;
+        }
 
         // Extract price from variants or top-level price field
         const variant      = prod.variants?.[0] ?? prod.prices?.[0] ?? {};
@@ -327,6 +349,8 @@ export async function POST(request) {
     }
   } catch (err) {
     console.error(`[GHL Webhook] Error handling ${type}:`, err.message);
+    console.error(`[GHL Webhook] Stack:`, err.stack);
+    console.error(`[GHL Webhook] Response data:`, JSON.stringify(err.response?.data ?? null));
     await updateWebhookLog(eventId, 'FAILED', err.message);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
