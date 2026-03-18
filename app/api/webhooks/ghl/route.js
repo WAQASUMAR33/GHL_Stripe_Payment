@@ -33,9 +33,12 @@ function verifyGHLWebhook(rawBody, signature) {
 
 export async function POST(request) {
   const rawBody   = Buffer.from(await request.arrayBuffer());
-  const signature = request.headers.get('x-ghl-signature') ?? '';
+  const signature = request.headers.get('x-ghl-signature');
 
-  if (GHL_CLIENT_SECRET && !verifyGHLWebhook(rawBody, signature)) {
+  // Only verify HMAC signature when the header is present.
+  // GHL payment-provider events include it; general marketplace webhooks
+  // (ProductCreate, PriceCreate, etc.) do not send this header.
+  if (GHL_CLIENT_SECRET && signature && !verifyGHLWebhook(rawBody, signature)) {
     console.warn('[GHL Webhook] Invalid signature');
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
