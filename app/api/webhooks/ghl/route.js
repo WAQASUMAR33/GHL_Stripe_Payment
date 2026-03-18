@@ -250,30 +250,48 @@ export async function POST(request) {
         const stripeAccount = await getStripeAccount(locationId);
         if (!stripeAccount) { await updateWebhookLog(eventId, 'SKIPPED', 'No Stripe account'); break; }
 
-        const priceData    = data ?? payload;
-        const ghlPriceId   = priceData.id ?? priceData._id;
-        const ghlProductId = priceData.productId ?? priceData.product;
-        if (!ghlPriceId || !ghlProductId) { await updateWebhookLog(eventId, 'SKIPPED', 'Missing price/product id'); break; }
+        const priceData = data ?? payload;
+        console.log('[GHL Webhook] DEBUG PriceCreate full priceData:', JSON.stringify(priceData).slice(0, 800));
+
+        // GHL may use different field names for the price ID and parent product ID
+        const ghlPriceId   = priceData.id   ?? priceData._id  ?? null;
+        const ghlProductId = priceData.productId ?? priceData.product ?? priceData.product_id ?? priceData.variantProductId ?? null;
+
+        console.log(`[GHL Webhook] DEBUG PriceCreate ghlPriceId=${ghlPriceId} ghlProductId=${ghlProductId}`);
+
+        if (!ghlPriceId || !ghlProductId) {
+          console.warn('[GHL Webhook] DEBUG PriceCreate — missing price or product id. Keys present:', Object.keys(priceData).join(', '));
+          await updateWebhookLog(eventId, 'SKIPPED', `Missing price/product id. Keys: ${Object.keys(priceData).join(', ')}`);
+          break;
+        }
 
         // Find the Stripe product this price belongs to
         const productMapping = await getProductSync(locationId, ghlProductId);
-        if (!productMapping) { await updateWebhookLog(eventId, 'SKIPPED', 'No Stripe product mapping found'); break; }
+        console.log(`[GHL Webhook] DEBUG PriceCreate productMapping:`, JSON.stringify(productMapping));
+        if (!productMapping) {
+          await updateWebhookLog(eventId, 'SKIPPED', `No Stripe product mapping found for GHL product ${ghlProductId}`);
+          break;
+        }
 
-        const amount      = priceData.amount ?? priceData.price ?? 0;
+        // GHL may send amount in dollars (e.g. 9.99) or cents (e.g. 999)
+        const rawAmount   = priceData.amount ?? priceData.price ?? priceData.unitAmount ?? 0;
+        // If amount looks like dollars (< 1000 and has decimals or is small), convert to cents
+        const amount      = rawAmount < 1000 ? Math.round(Number(rawAmount) * 100) : Math.round(Number(rawAmount));
         const currency    = (priceData.currency ?? 'usd').toLowerCase();
         const isRecurring = priceData.recurring ?? priceData.type === 'RECURRING' ?? false;
-        const interval    = priceData.interval ?? 'month';
+        const interval    = priceData.interval ?? priceData.recurringInterval ?? 'month';
+
+        console.log(`[GHL Webhook] DEBUG PriceCreate amount=${amount} currency=${currency} recurring=${isRecurring}`);
 
         const stripePrice = await createPrice({
           stripeAccountId: stripeAccount.stripeAccountId,
           productId:       productMapping.stripeProductId,
-          amount:          Math.round(Number(amount) * 100),
+          amount,
           currency,
           recurring:       isRecurring ? { interval } : undefined,
         });
 
         await savePriceSync(locationId, ghlPriceId, ghlProductId, stripePrice.id);
-        // Set as default price on the product
         await setProductDefaultPrice(stripeAccount.stripeAccountId, productMapping.stripeProductId, stripePrice.id);
 
         console.log(`[GHL Webhook] PriceCreate: GHL ${ghlPriceId} → Stripe ${stripePrice.id}`);
