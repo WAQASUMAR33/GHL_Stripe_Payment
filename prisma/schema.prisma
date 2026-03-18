@@ -102,6 +102,19 @@ model GhlProductSync {
   @@map("ghl_product_sync")
 }
 
+model GhlPriceSync {
+  id             String   @id @default(cuid())
+  locationId     String   @map("location_id")
+  ghlPriceId     String   @map("ghl_price_id")
+  ghlProductId   String   @map("ghl_product_id")
+  stripePriceId  String   @map("stripe_price_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([locationId, ghlPriceId])
+  @@map("ghl_price_sync")
+}
+
 enum PaymentStatus {
   PENDING
   SUCCESS

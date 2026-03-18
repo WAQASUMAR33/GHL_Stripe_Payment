@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { createHmac } from 'crypto';
-import { createPaymentIntent, createRefund, createProduct, createPrice, updateProduct } from '@/lib/stripe';
+import { createPaymentIntent, createRefund, createProduct, createPrice, updateProduct, archivePrice, setProductDefaultPrice } from '@/lib/stripe';
 import {
   getStripeAccount,
   createWebhookLog,
@@ -17,6 +17,9 @@ import {
   saveProductSync,
   getProductSync,
   deleteProductSync,
+  savePriceSync,
+  getPriceSync,
+  deletePriceSync,
 } from '@/lib/tokenStore';
 
 const GHL_CLIENT_SECRET = process.env.GHL_CLIENT_SECRET;
@@ -208,6 +211,103 @@ export async function POST(request) {
         await deleteProductSync(locationId, ghlProductId);
 
         console.log(`[GHL Webhook] ProductDelete: archived Stripe ${mapping.stripeProductId}`);
+        await updateWebhookLog(eventId, 'PROCESSED');
+        return NextResponse.json({ received: true });
+      }
+
+      case 'PriceCreate': {
+        const stripeAccount = await getStripeAccount(locationId);
+        if (!stripeAccount) { await updateWebhookLog(eventId, 'SKIPPED', 'No Stripe account'); break; }
+
+        const priceData    = data ?? payload;
+        const ghlPriceId   = priceData.id ?? priceData._id;
+        const ghlProductId = priceData.productId ?? priceData.product;
+        if (!ghlPriceId || !ghlProductId) { await updateWebhookLog(eventId, 'SKIPPED', 'Missing price/product id'); break; }
+
+        // Find the Stripe product this price belongs to
+        const productMapping = await getProductSync(locationId, ghlProductId);
+        if (!productMapping) { await updateWebhookLog(eventId, 'SKIPPED', 'No Stripe product mapping found'); break; }
+
+        const amount      = priceData.amount ?? priceData.price ?? 0;
+        const currency    = (priceData.currency ?? 'usd').toLowerCase();
+        const isRecurring = priceData.recurring ?? priceData.type === 'RECURRING' ?? false;
+        const interval    = priceData.interval ?? 'month';
+
+        const stripePrice = await createPrice({
+          stripeAccountId: stripeAccount.stripeAccountId,
+          productId:       productMapping.stripeProductId,
+          amount:          Math.round(Number(amount) * 100),
+          currency,
+          recurring:       isRecurring ? { interval } : undefined,
+        });
+
+        await savePriceSync(locationId, ghlPriceId, ghlProductId, stripePrice.id);
+        // Set as default price on the product
+        await setProductDefaultPrice(stripeAccount.stripeAccountId, productMapping.stripeProductId, stripePrice.id);
+
+        console.log(`[GHL Webhook] PriceCreate: GHL ${ghlPriceId} → Stripe ${stripePrice.id}`);
+        await updateWebhookLog(eventId, 'PROCESSED');
+        return NextResponse.json({ received: true, stripePriceId: stripePrice.id });
+      }
+
+      case 'PriceUpdate': {
+        // Stripe prices are immutable — archive old price and create a new one
+        const stripeAccount = await getStripeAccount(locationId);
+        if (!stripeAccount) { await updateWebhookLog(eventId, 'SKIPPED', 'No Stripe account'); break; }
+
+        const priceData    = data ?? payload;
+        const ghlPriceId   = priceData.id ?? priceData._id;
+        const ghlProductId = priceData.productId ?? priceData.product;
+        if (!ghlPriceId) { await updateWebhookLog(eventId, 'SKIPPED', 'Missing price id'); break; }
+
+        const priceMapping   = await getPriceSync(locationId, ghlPriceId);
+        const productMapping = ghlProductId ? await getProductSync(locationId, ghlProductId) : null;
+        const stripeProductId = productMapping?.stripeProductId ?? null;
+
+        // Archive old Stripe price
+        if (priceMapping?.stripePriceId) {
+          try { await archivePrice(stripeAccount.stripeAccountId, priceMapping.stripePriceId); } catch {}
+        }
+
+        // Create replacement price if we have the product mapping
+        if (stripeProductId) {
+          const amount      = priceData.amount ?? priceData.price ?? 0;
+          const currency    = (priceData.currency ?? 'usd').toLowerCase();
+          const isRecurring = priceData.recurring ?? priceData.type === 'RECURRING' ?? false;
+          const interval    = priceData.interval ?? 'month';
+
+          const newPrice = await createPrice({
+            stripeAccountId: stripeAccount.stripeAccountId,
+            productId:       stripeProductId,
+            amount:          Math.round(Number(amount) * 100),
+            currency,
+            recurring:       isRecurring ? { interval } : undefined,
+          });
+
+          await savePriceSync(locationId, ghlPriceId, ghlProductId, newPrice.id);
+          await setProductDefaultPrice(stripeAccount.stripeAccountId, stripeProductId, newPrice.id);
+          console.log(`[GHL Webhook] PriceUpdate: new Stripe price ${newPrice.id}`);
+        }
+
+        await updateWebhookLog(eventId, 'PROCESSED');
+        return NextResponse.json({ received: true });
+      }
+
+      case 'PriceDelete': {
+        const stripeAccount = await getStripeAccount(locationId);
+        if (!stripeAccount) { await updateWebhookLog(eventId, 'SKIPPED', 'No Stripe account'); break; }
+
+        const priceData  = data ?? payload;
+        const ghlPriceId = priceData.id ?? priceData._id;
+        if (!ghlPriceId) { await updateWebhookLog(eventId, 'SKIPPED', 'Missing price id'); break; }
+
+        const mapping = await getPriceSync(locationId, ghlPriceId);
+        if (mapping?.stripePriceId) {
+          await archivePrice(stripeAccount.stripeAccountId, mapping.stripePriceId);
+          await deletePriceSync(locationId, ghlPriceId);
+          console.log(`[GHL Webhook] PriceDelete: archived Stripe price ${mapping.stripePriceId}`);
+        }
+
         await updateWebhookLog(eventId, 'PROCESSED');
         return NextResponse.json({ received: true });
       }
