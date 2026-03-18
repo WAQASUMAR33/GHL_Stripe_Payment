@@ -89,6 +89,19 @@ model GhlWebhookLog {
   @@map("ghl_webhook_logs")
 }
 
+model GhlProductSync {
+  id              String   @id @default(cuid())
+  locationId      String   @map("location_id")
+  ghlProductId    String   @map("ghl_product_id")
+  stripeProductId String   @map("stripe_product_id")
+  stripePriceId   String?  @map("stripe_price_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([locationId, ghlProductId])
+  @@map("ghl_product_sync")
+}
+
 enum PaymentStatus {
   PENDING
   SUCCESS

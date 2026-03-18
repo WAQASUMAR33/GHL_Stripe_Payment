@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { ghlClient } from '@/lib/ghl';
-import { getStripeAccount } from '@/lib/tokenStore';
+import { getStripeAccount, saveProductSync } from '@/lib/tokenStore';
 import { listProducts, createProduct, createPrice } from '@/lib/stripe';
 
 export async function POST(request) {
@@ -89,15 +89,22 @@ export async function POST(request) {
         description,
       });
 
+      let stripePrice = null;
       if (priceAmount > 0) {
         const isRecurring = gp.recurring ?? gp.type === 'recurring';
-        await createPrice({
+        stripePrice = await createPrice({
           stripeAccountId: stripeAccount.stripeAccountId,
           productId:       stripeProduct.id,
           amount:          priceAmount,
           currency,
           recurring: isRecurring ? { interval: gp.interval ?? 'month' } : undefined,
         });
+      }
+
+      // Save mapping so future GHL webhook updates/deletes can find the Stripe product
+      const ghlProductId = gp.id ?? gp._id;
+      if (ghlProductId) {
+        await saveProductSync(locationId, ghlProductId, stripeProduct.id, stripePrice?.id ?? null);
       }
 
       synced++;
