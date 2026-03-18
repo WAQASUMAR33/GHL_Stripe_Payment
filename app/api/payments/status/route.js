@@ -28,7 +28,7 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  console.log(`[queryUrl] type=${type} locationId=${locationId}`);
+  console.log(`[queryUrl] type=${type} locationId=${locationId} body:`, JSON.stringify(body));
 
   switch (type) {
 
