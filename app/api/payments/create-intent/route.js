@@ -34,9 +34,10 @@ import {
   createPaymentIntent,
   createCustomer,
   createSubscription,
+  createInlineSubscription,
   getPrice,
 } from '@/lib/stripe';
-import { getStripeAccount, upsertPaymentEvent } from '@/lib/tokenStore';
+import { getStripeAccount, upsertPaymentEvent, getPriceSync } from '@/lib/tokenStore';
 
 export async function POST(request) {
   let body;
@@ -53,9 +54,16 @@ export async function POST(request) {
     priceId,
     entityId,
     entityType,
+    interval,
+    isRecurring: isRecurringFlag,
     applicationFeeRate = 0,
     metadata = {},
   } = body;
+
+  // Log full request body so we can see what GHL sends for recurring products
+  console.log('[create-intent] body:', JSON.stringify({
+    locationId, amount, currency, priceId, entityId, entityType, interval, isRecurring: isRecurringFlag,
+  }));
 
   if (!locationId) {
     return NextResponse.json({ error: 'locationId is required' }, { status: 400 });
@@ -65,7 +73,12 @@ export async function POST(request) {
   }
 
   const finalEntityId   = entityId   || `ghl-${Date.now()}`;
-  const finalEntityType = entityType || 'transaction';
+  const finalEntityType = entityType || 'invoice';
+
+  // Detect recurring from entityType (GHL may send 'subscription', 'SUBSCRIPTION', 'RECURRING')
+  const RECURRING_ENTITY_TYPES = new Set(['subscription', 'subscription_order', 'recurring', 'recurring_order']);
+  const entityTypeIsRecurring = RECURRING_ENTITY_TYPES.has((entityType ?? '').toLowerCase());
+  const resolvedInterval = interval || 'month';
 
   const stripeAccount = await getStripeAccount(locationId);
   if (!stripeAccount) {
@@ -82,11 +95,21 @@ export async function POST(request) {
     ...metadata,
   };
 
-  // ── If a priceId is provided, check whether it is recurring ──────────────
+  // ── If a priceId is provided, resolve it (may be GHL or Stripe price ID) ─
   if (priceId) {
+    // First try to resolve as a GHL price ID via our sync DB
+    let resolvedPriceId = priceId;
+    try {
+      const priceSync = await getPriceSync(locationId, priceId);
+      if (priceSync?.stripePriceId) {
+        resolvedPriceId = priceSync.stripePriceId;
+        console.log(`[create-intent] Resolved GHL priceId ${priceId} → Stripe ${resolvedPriceId}`);
+      }
+    } catch {}
+
     let price;
     try {
-      price = await getPrice(priceId, stripeAccount.stripeAccountId);
+      price = await getPrice(resolvedPriceId, stripeAccount.stripeAccountId);
     } catch (err) {
       console.error('[create-intent] getPrice error:', err.message);
       return NextResponse.json({ error: `Invalid price: ${err.message}` }, { status: 400 });
@@ -176,7 +199,60 @@ export async function POST(request) {
     });
   }
 
-  // ── No priceId → plain amount PaymentIntent ───────────────────────────────
+  // ── No priceId → check if recurring indicated by entityType or flag ─────────
+  const shouldCreateSubscription = isRecurringFlag || entityTypeIsRecurring;
+  console.log(`[create-intent] no priceId — entityType=${finalEntityType} entityTypeIsRecurring=${entityTypeIsRecurring} isRecurringFlag=${isRecurringFlag} → shouldCreateSubscription=${shouldCreateSubscription}`);
+
+  if (shouldCreateSubscription && amount) {
+    const customerEmail = metadata.customerEmail ?? null;
+    const customerName  = metadata.customerName  ?? null;
+    const customerPhone = metadata.customerPhone ?? null;
+
+    let customer;
+    try {
+      customer = await createCustomer({
+        stripeAccountId: stripeAccount.stripeAccountId,
+        email: customerEmail, name: customerName, phone: customerPhone,
+        metadata: { locationId, entityId: finalEntityId },
+      });
+    } catch (err) {
+      console.error('[create-intent] createCustomer error:', err.message);
+      return NextResponse.json({ error: `Failed to create customer: ${err.message}` }, { status: 500 });
+    }
+
+    let subscription;
+    try {
+      subscription = await createInlineSubscription({
+        stripeAccountId: stripeAccount.stripeAccountId,
+        customerId:      customer.id,
+        amount,
+        currency,
+        interval:        resolvedInterval,
+        productName:     'Subscription',
+        metadata:        { ...sharedMeta, entityType: 'subscription' },
+      });
+    } catch (err) {
+      console.error('[create-intent] createInlineSubscription error:', err.message);
+      return NextResponse.json({ error: `Failed to create subscription: ${err.message}` }, { status: 500 });
+    }
+
+    const paymentIntent = subscription.latest_invoice?.payment_intent;
+    if (!paymentIntent?.client_secret) {
+      return NextResponse.json({ error: 'Subscription created but no payment required yet' }, { status: 422 });
+    }
+
+    console.log(`[create-intent] inline subscription ${subscription.id} PI ${paymentIntent.id}`);
+    return NextResponse.json({
+      clientSecret:    paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+      subscriptionId:  subscription.id,
+      publishableKey:  stripeAccount.publishableKey,
+      stripeAccountId: stripeAccount.stripeAccountId,
+      mode:            'subscription',
+    });
+  }
+
+  // ── Plain amount PaymentIntent ────────────────────────────────────────────
   const applicationFeeAmount =
     applicationFeeRate > 0 ? Math.round(amount * applicationFeeRate) : 0;
 

@@ -204,7 +204,9 @@ export default function CheckoutPage() {
       entityId,
       entityType,
       contactId,
-      priceId,        // Stripe Price ID for product-based checkout
+      priceId,        // GHL or Stripe price ID for product-based checkout
+      interval,       // recurring interval: 'month' | 'year' | 'week' etc.
+      recurring,      // boolean recurring flag GHL may send
       contact,
       email,
       firstName,
@@ -222,34 +224,40 @@ export default function CheckoutPage() {
       ? [customerFirst, customerLast].filter(Boolean).join(' ')
       : null;
 
-    const resolvedCurrency   = (currency   || 'usd').toLowerCase();
-    const resolvedEntityId   = entityId    || transactionId || orderId || `ghl-${Date.now()}`;
-    const resolvedEntityType = entityType  || (priceId ? 'transaction' : 'transaction');
+    const resolvedCurrency   = (currency || 'usd').toLowerCase();
+    const resolvedEntityId   = entityId  || transactionId || orderId || `ghl-${Date.now()}`;
+    const resolvedEntityType = entityType || null;   // pass GHL's actual entityType, not a hardcoded default
     const amountCents        = amount ? Math.round(Number(amount) * 100) : undefined;
+    const resolvedInterval   = interval || null;
+    const isRecurring        = recurring === true || recurring === 'true' || !!interval;
+
+    addLog(`props: entityType=${resolvedEntityType} interval=${resolvedInterval} recurring=${isRecurring} priceId=${priceId ?? 'none'}`);
 
     // If GHL already passed a clientSecret from PAYMENT_PROVIDER_CHARGE, use it directly.
     // This ensures we use the same PI that GHL's transaction is linked to.
     if (clientSecret && publishableKey) {
       addLog(`using GHL-provided clientSecret directly`);
-      setMode('payment');
+      setMode(isRecurring ? 'subscription' : 'payment');
       setClientSecret(clientSecret);
       setStripePromise(loadStripe(publishableKey, { stripeAccount: undefined }));
       setReady(true);
       return;
     }
 
-    addLog(`calling create-intent: priceId=${priceId ?? 'none'} amount=${amountCents} ${resolvedCurrency} locationId=${locationId}`);
+    addLog(`calling create-intent: priceId=${priceId ?? 'none'} amount=${amountCents} ${resolvedCurrency} recurring=${isRecurring}`);
 
     fetch('/api/payments/create-intent', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         locationId,
-        ...(priceId    ? { priceId }                        : {}),
-        ...(amountCents ? { amount: amountCents }            : {}),
-        currency:   resolvedCurrency,
-        entityId:   resolvedEntityId,
-        entityType: resolvedEntityType,
+        ...(priceId      ? { priceId }              : {}),
+        ...(amountCents  ? { amount: amountCents }   : {}),
+        currency:    resolvedCurrency,
+        entityId:    resolvedEntityId,
+        entityType:  resolvedEntityType,
+        interval:    resolvedInterval,
+        isRecurring: isRecurring || undefined,
         metadata: {
           ghlTransactionId: transactionId ?? null,
           ghlOrderId:       orderId       ?? null,
