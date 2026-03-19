@@ -38,6 +38,7 @@ import {
   getPrice,
 } from '@/lib/stripe';
 import { getStripeAccount, upsertPaymentEvent, getPriceSync } from '@/lib/tokenStore';
+import { getTransaction } from '@/lib/ghl';
 
 export async function POST(request) {
   let body;
@@ -76,9 +77,25 @@ export async function POST(request) {
   const finalEntityType = entityType || 'invoice';
 
   // Detect recurring from entityType (GHL may send 'subscription', 'SUBSCRIPTION', 'RECURRING')
-  const RECURRING_ENTITY_TYPES = new Set(['subscription', 'subscription_order', 'recurring', 'recurring_order']);
+  const RECURRING_ENTITY_TYPES = new Set(['subscription', 'subscription_order', 'recurring', 'recurring_order', 'subscriptions']);
   const entityTypeIsRecurring = RECURRING_ENTITY_TYPES.has((entityType ?? '').toLowerCase());
-  const resolvedInterval = interval || 'month';
+  let resolvedInterval = interval || 'month';
+
+  // Look up the GHL transaction to check if it's a subscription order.
+  // GHL sends entityType='invoice' for both one-time AND subscription orders,
+  // so we must query the transaction to distinguish them.
+  let ghlTransactionIsSubscription = false;
+  const ghlTransactionId = metadata?.ghlTransactionId ?? null;
+  if (ghlTransactionId && locationId) {
+    const txn = await getTransaction(locationId, ghlTransactionId);
+    console.log(`[create-intent] GHL transaction lookup: id=${ghlTransactionId} entitySourceType=${txn?.entitySourceType} status=${txn?.status}`);
+    if (txn) {
+      const sourceType = (txn.entitySourceType ?? '').toLowerCase();
+      ghlTransactionIsSubscription = sourceType === 'subscriptions' || sourceType === 'subscription';
+      // If GHL provides an interval on the transaction, use it
+      if (txn.interval) resolvedInterval = txn.interval;
+    }
+  }
 
   const stripeAccount = await getStripeAccount(locationId);
   if (!stripeAccount) {
@@ -199,9 +216,9 @@ export async function POST(request) {
     });
   }
 
-  // ── No priceId → check if recurring indicated by entityType or flag ─────────
-  const shouldCreateSubscription = isRecurringFlag || entityTypeIsRecurring;
-  console.log(`[create-intent] no priceId — entityType=${finalEntityType} entityTypeIsRecurring=${entityTypeIsRecurring} isRecurringFlag=${isRecurringFlag} → shouldCreateSubscription=${shouldCreateSubscription}`);
+  // ── No priceId → check if recurring indicated by any signal ─────────────────
+  const shouldCreateSubscription = isRecurringFlag || entityTypeIsRecurring || ghlTransactionIsSubscription;
+  console.log(`[create-intent] no priceId — entityType=${finalEntityType} entityTypeIsRecurring=${entityTypeIsRecurring} isRecurringFlag=${isRecurringFlag} ghlTxnIsSubscription=${ghlTransactionIsSubscription} → shouldCreateSubscription=${shouldCreateSubscription}`);
 
   if (shouldCreateSubscription && amount) {
     const customerEmail = metadata.customerEmail ?? null;
