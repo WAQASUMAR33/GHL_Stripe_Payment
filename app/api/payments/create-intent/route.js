@@ -57,13 +57,15 @@ export async function POST(request) {
     entityType,
     interval,
     isRecurring: isRecurringFlag,
+    ghlSubscriptionId,
     applicationFeeRate = 0,
     metadata = {},
   } = body;
 
   // Log full request body so we can see what GHL sends for recurring products
   console.log('[create-intent] body:', JSON.stringify({
-    locationId, amount, currency, priceId, entityId, entityType, interval, isRecurring: isRecurringFlag,
+    locationId, amount, currency, priceId, entityId, entityType, interval,
+    isRecurring: isRecurringFlag, ghlSubscriptionId,
   }));
 
   if (!locationId) {
@@ -217,8 +219,9 @@ export async function POST(request) {
   }
 
   // ── No priceId → check if recurring indicated by any signal ─────────────────
-  const shouldCreateSubscription = isRecurringFlag || entityTypeIsRecurring || ghlTransactionIsSubscription;
-  console.log(`[create-intent] no priceId — entityType=${finalEntityType} entityTypeIsRecurring=${entityTypeIsRecurring} isRecurringFlag=${isRecurringFlag} ghlTxnIsSubscription=${ghlTransactionIsSubscription} → shouldCreateSubscription=${shouldCreateSubscription}`);
+  // ghlSubscriptionId present = GHL explicitly told us this is a subscription checkout
+  const shouldCreateSubscription = !!ghlSubscriptionId || isRecurringFlag || entityTypeIsRecurring || ghlTransactionIsSubscription;
+  console.log(`[create-intent] no priceId — ghlSubscriptionId=${ghlSubscriptionId ?? 'none'} entityType=${finalEntityType} entityTypeIsRecurring=${entityTypeIsRecurring} isRecurringFlag=${isRecurringFlag} ghlTxnIsSubscription=${ghlTransactionIsSubscription} → shouldCreateSubscription=${shouldCreateSubscription}`);
 
   if (shouldCreateSubscription && amount) {
     const customerEmail = metadata.customerEmail ?? null;
@@ -246,7 +249,11 @@ export async function POST(request) {
         currency,
         interval:        resolvedInterval,
         productName:     'Subscription',
-        metadata:        { ...sharedMeta, entityType: 'subscription' },
+        metadata: {
+          ...sharedMeta,
+          entityType:        'subscription',
+          ghlSubscriptionId: ghlSubscriptionId ?? null,
+        },
       });
     } catch (err) {
       console.error('[create-intent] createInlineSubscription error:', err.message);

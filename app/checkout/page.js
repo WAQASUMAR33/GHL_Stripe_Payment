@@ -205,6 +205,7 @@ export default function CheckoutPage() {
       entityType,
       contactId,
       priceId,        // GHL or Stripe price ID for product-based checkout
+      subscriptionId: ghlSubscriptionId, // GHL subscription ID — present for recurring products
       interval,       // recurring interval: 'month' | 'year' | 'week' etc.
       recurring,      // boolean recurring flag GHL may send
       contact,
@@ -231,7 +232,7 @@ export default function CheckoutPage() {
     const resolvedInterval   = interval || null;
     const isRecurring        = recurring === true || recurring === 'true' || !!interval;
 
-    addLog(`props: entityType=${resolvedEntityType} interval=${resolvedInterval} recurring=${isRecurring} priceId=${priceId ?? 'none'}`);
+    addLog(`props: entityType=${resolvedEntityType} ghlSubscriptionId=${ghlSubscriptionId ?? 'none'} interval=${resolvedInterval} recurring=${isRecurring} priceId=${priceId ?? 'none'}`);
 
     // If GHL already passed a clientSecret from PAYMENT_PROVIDER_CHARGE, use it directly.
     // This ensures we use the same PI that GHL's transaction is linked to.
@@ -251,18 +252,20 @@ export default function CheckoutPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         locationId,
-        ...(priceId      ? { priceId }              : {}),
-        ...(amountCents  ? { amount: amountCents }   : {}),
+        ...(priceId           ? { priceId }                        : {}),
+        ...(amountCents       ? { amount: amountCents }             : {}),
+        ...(ghlSubscriptionId ? { ghlSubscriptionId }               : {}),
         currency:    resolvedCurrency,
         entityId:    resolvedEntityId,
         entityType:  resolvedEntityType,
         interval:    resolvedInterval,
         isRecurring: isRecurring || undefined,
         metadata: {
-          ghlTransactionId: transactionId ?? null,
-          ghlOrderId:       orderId       ?? null,
-          ghlEntityId:      entityId      ?? null,
-          ghlContactId:     contactId     ?? null,
+          ghlTransactionId:  transactionId    ?? null,
+          ghlSubscriptionId: ghlSubscriptionId ?? null,
+          ghlOrderId:        orderId           ?? null,
+          ghlEntityId:       entityId          ?? null,
+          ghlContactId:      contactId         ?? null,
           customerName,
           customerEmail,
           customerPhone,

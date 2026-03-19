@@ -202,11 +202,14 @@ export async function POST(request) {
       case 'customer.subscription.updated': {
         const sub = event.data.object;
         if (locationId) {
+          // ghlSubscriptionId is the GHL-side subscription ID stored in metadata during creation
+          const ghlSubscriptionId = sub.metadata?.ghlSubscriptionId ?? sub.metadata?.entityId;
+          console.log(`[Stripe Webhook] subscription ${event.type} sub=${sub.id} status=${sub.status} ghlSubscriptionId=${ghlSubscriptionId}`);
           try {
             await postSubscriptionUpdateToGHL(locationId, {
               externalSubscriptionId: sub.id,
               status:   sub.status,
-              entityId: sub.metadata?.entityId,
+              entityId: ghlSubscriptionId,
             });
           } catch (ghlErr) {
             console.error('[Stripe Webhook] GHL subscription update failed (non-fatal):',
@@ -221,11 +224,12 @@ export async function POST(request) {
       case 'customer.subscription.deleted': {
         const sub = event.data.object;
         if (locationId) {
+          const ghlSubscriptionId = sub.metadata?.ghlSubscriptionId ?? sub.metadata?.entityId;
           try {
             await postSubscriptionUpdateToGHL(locationId, {
               externalSubscriptionId: sub.id,
               status:   'canceled',
-              entityId: sub.metadata?.entityId,
+              entityId: ghlSubscriptionId,
             });
           } catch (ghlErr) {
             console.error('[Stripe Webhook] GHL subscription deleted update failed (non-fatal):',
