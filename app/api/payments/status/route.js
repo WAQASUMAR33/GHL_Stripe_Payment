@@ -55,14 +55,18 @@ export async function POST(request) {
 
       console.log(`[queryUrl/verify] chargeId=${chargeId} locationId=${resolvedLocationId} stripeAccountId=${stripeAccount?.stripeAccountId}`);
 
-      if (!stripeAccount) return NextResponse.json({ failed: true });
+      if (!stripeAccount) {
+        console.warn('[queryUrl/verify] No stripeAccount found — returning failed');
+        return NextResponse.json({ failed: true });
+      }
       try {
         const intent = await getPaymentIntent(chargeId, stripeAccount.stripeAccountId);
+        console.log(`[queryUrl/verify] PI status=${intent.status} → returning ${intent.status === 'succeeded' ? 'success:true' : 'success:false/failed'}`);
         if (intent.status === 'succeeded') return NextResponse.json({ success: true });
         if (['canceled', 'payment_failed'].includes(intent.status)) return NextResponse.json({ failed: true });
         return NextResponse.json({ success: false });
       } catch (err) {
-        console.error('[queryUrl/verify]', err.message);
+        console.error('[queryUrl/verify] Stripe lookup failed:', err.message);
         return NextResponse.json({ failed: true });
       }
     }
