@@ -14,6 +14,7 @@ import {
   getStripeAccount,
   createWebhookLog,
   updateWebhookLog,
+  upsertPaymentEvent,
   saveProductSync,
   getProductSync,
   deleteProductSync,
@@ -121,6 +122,28 @@ export async function POST(request) {
             customerPhone,
           },
         });
+
+        // Save PI #1 to DB immediately so verify and Stripe webhook can resolve it
+        // GHL links its pending transaction to this PI ID. If checkout creates PI #2,
+        // the Stripe webhook looks up PI #1 by entityId and uses its ID for GHL notification.
+        try {
+          await upsertPaymentEvent({
+            locationId,
+            stripeAccountId: stripeAccount.stripeAccountId,
+            paymentIntentId: intent.id,
+            entityId:        data.entityId ?? null,
+            entityType:      data.entityType ?? 'invoice',
+            amount:          data.amount,
+            currency:        data.currency ?? 'usd',
+            status:          'PENDING',
+            customerName,
+            customerEmail,
+            customerPhone,
+          });
+          console.log(`[GHL Webhook] PAYMENT_PROVIDER_CHARGE: saved PI #1 ${intent.id} for entityId=${data.entityId}`);
+        } catch (dbErr) {
+          console.warn('[GHL Webhook] Failed to pre-save PI #1 (non-fatal):', dbErr.message);
+        }
 
         await updateWebhookLog(eventId, 'PROCESSED');
         return NextResponse.json({
