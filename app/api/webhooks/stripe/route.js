@@ -91,31 +91,30 @@ export async function POST(request) {
           metadata:        intent.metadata,
         });
         if (locationId) {
-          // GHL links its pending transaction to PI #1 (from PAYMENT_PROVIDER_CHARGE).
-          // If checkout created PI #2, look up PI #1 by entityId and use its ID so GHL
-          // can match the notification to the pending transaction.
-          let externalTransactionId = intent.id;
+          // Resolve chargeId (the Stripe PI GHL linked its transaction to = PI #1).
+          // If checkout created PI #2 with a different ID, look up PI #1 by entityId.
+          let chargeId = intent.id;
           if (intent.metadata?.entityId) {
             try {
               const pi1Event = await getPaymentEventByEntityId(locationId, intent.metadata.entityId);
               if (pi1Event && pi1Event.paymentIntentId !== intent.id) {
-                console.log(`[Stripe Webhook] PI mismatch detected — using PI #1 ${pi1Event.paymentIntentId} (GHL transaction PI) instead of PI #2 ${intent.id} for GHL notification`);
-                externalTransactionId = pi1Event.paymentIntentId;
+                console.log(`[Stripe Webhook] PI mismatch — using PI #1 ${pi1Event.paymentIntentId} as chargeId for GHL (current PI #2: ${intent.id})`);
+                chargeId = pi1Event.paymentIntentId;
               }
             } catch (lookupErr) {
               console.warn('[Stripe Webhook] PI #1 lookup failed (non-fatal):', lookupErr.message);
             }
           }
 
+          // ghlTransactionId is GHL's internal transaction ID stored in PI metadata
+          const ghlTransactionId = intent.metadata?.ghlTransactionId ?? intent.metadata?.entityId ?? null;
+          console.log(`[Stripe Webhook] Notifying GHL — chargeId=${chargeId} ghlTransactionId=${ghlTransactionId}`);
+
           try {
             await postPaymentUpdateToGHL(locationId, {
-              externalTransactionId,
-              amount:                intent.amount,
-              currency:              intent.currency,
-              status:                'success',
-              ...(intent.metadata?.entityId     ? { entityId:   intent.metadata.entityId }     : {}),
-              ...(intent.metadata?.entityType   ? { entityType: intent.metadata.entityType }   : {}),
-              ...(intent.metadata?.ghlContactId ? { contactId:  intent.metadata.ghlContactId } : {}),
+              chargeId,
+              ghlTransactionId,
+              amount: intent.amount,
             });
           } catch (ghlErr) {
             console.error('[Stripe Webhook] GHL payment update failed (non-fatal):',

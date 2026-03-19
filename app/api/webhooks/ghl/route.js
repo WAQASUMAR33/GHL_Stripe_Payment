@@ -108,15 +108,21 @@ export async function POST(request) {
         const customerEmail = contact.email ?? data.email ?? null;
         const customerPhone = contact.phone ?? data.phone ?? null;
 
+        // data.transactionId = GHL's internal transaction ID (what we pass back as ghlTransactionId)
+        // data.entityId = GHL's order/invoice entity ID
+        const ghlTransactionId = data.transactionId ?? data.entityId ?? null;
+        console.log(`[GHL Webhook] PAYMENT_PROVIDER_CHARGE ghlTransactionId=${ghlTransactionId} entityId=${data.entityId} entityType=${data.entityType}`);
+
         const intent = await createPaymentIntent({
           amount:          data.amount,
           currency:        data.currency ?? 'usd',
           stripeAccountId: stripeAccount.stripeAccountId,
           metadata: {
             locationId,
-            entityId:      data.entityId,
-            entityType:    data.entityType,
-            ghlContactId:  data.contactId ?? null,
+            entityId:         data.entityId,
+            entityType:       data.entityType,
+            ghlTransactionId,
+            ghlContactId:     data.contactId ?? null,
             customerName,
             customerEmail,
             customerPhone,
