@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { createHmac } from 'crypto';
-import { createPaymentIntent, createRefund, createProduct, createPrice, updateProduct, archivePrice, setProductDefaultPrice } from '@/lib/stripe';
+import { createPaymentIntent, createRefund, createCustomer, createSubscription, getPrice, createProduct, createPrice, updateProduct, archivePrice, setProductDefaultPrice } from '@/lib/stripe';
 import {
   getStripeAccount,
   createWebhookLog,
@@ -111,29 +111,96 @@ export async function POST(request) {
         const customerPhone = contact.phone ?? data.phone ?? null;
 
         // data.transactionId = GHL's internal transaction ID (what we pass back as ghlTransactionId)
-        // data.entityId = GHL's order/invoice entity ID
         const ghlTransactionId = data.transactionId ?? data.entityId ?? null;
         console.log(`[GHL Webhook] PAYMENT_PROVIDER_CHARGE ghlTransactionId=${ghlTransactionId} entityId=${data.entityId} entityType=${data.entityType}`);
 
+        // ── Detect recurring product ──────────────────────────────────────────
+        // GHL may send ghlPriceId / ghlProductId so we can look up the Stripe price
+        const ghlPriceId   = data.priceId   ?? data.variantId   ?? null;
+        const ghlProductId = data.productId ?? null;
+        let isRecurring  = false;
+        let stripePriceId = null;
+
+        if (ghlPriceId) {
+          try {
+            const priceSync = await getPriceSync(locationId, ghlPriceId);
+            if (priceSync?.stripePriceId) {
+              stripePriceId = priceSync.stripePriceId;
+              const stripePrice = await getPrice(stripePriceId, stripeAccount.stripeAccountId);
+              isRecurring = !!stripePrice.recurring;
+            }
+          } catch (e) { console.warn('[GHL Webhook] priceSync lookup failed:', e.message); }
+        }
+
+        if (!isRecurring && ghlProductId) {
+          try {
+            const productSync = await getProductSync(locationId, ghlProductId);
+            if (productSync?.stripePriceId) {
+              stripePriceId = productSync.stripePriceId;
+              const stripePrice = await getPrice(stripePriceId, stripeAccount.stripeAccountId);
+              isRecurring = !!stripePrice.recurring;
+            }
+          } catch (e) { console.warn('[GHL Webhook] productSync lookup failed:', e.message); }
+        }
+
+        // Also honour explicit recurring flags GHL might send
+        if (!isRecurring) {
+          isRecurring = data.recurring === true || data.type === 'RECURRING' || !!data.interval;
+        }
+
+        console.log(`[GHL Webhook] PAYMENT_PROVIDER_CHARGE isRecurring=${isRecurring} stripePriceId=${stripePriceId} ghlPriceId=${ghlPriceId} ghlProductId=${ghlProductId}`);
+
+        const sharedMeta = {
+          locationId,
+          entityId:         data.entityId,
+          entityType:       data.entityType ?? (isRecurring ? 'subscription' : 'invoice'),
+          ghlTransactionId,
+          ghlContactId:     data.contactId ?? null,
+          customerName,
+          customerEmail,
+          customerPhone,
+        };
+
+        // ── Recurring → create Stripe Subscription ────────────────────────────
+        if (isRecurring && stripePriceId) {
+          const customer = await createCustomer({
+            stripeAccountId: stripeAccount.stripeAccountId,
+            email:    customerEmail,
+            name:     customerName,
+            phone:    customerPhone,
+            metadata: { locationId, entityId: data.entityId },
+          });
+
+          const subscription = await createSubscription({
+            stripeAccountId: stripeAccount.stripeAccountId,
+            customerId:      customer.id,
+            priceId:         stripePriceId,
+            metadata:        sharedMeta,
+          });
+
+          const paymentIntent = subscription.latest_invoice?.payment_intent;
+          if (!paymentIntent?.client_secret) {
+            await updateWebhookLog(eventId, 'FAILED', 'Subscription created but no payment intent available');
+            return NextResponse.json({ error: 'Subscription payment not required yet' }, { status: 422 });
+          }
+
+          console.log(`[GHL Webhook] Created subscription ${subscription.id} PI ${paymentIntent.id} for entityId=${data.entityId}`);
+          await updateWebhookLog(eventId, 'PROCESSED');
+          return NextResponse.json({
+            clientSecret:   paymentIntent.client_secret,
+            publishableKey: stripeAccount.publishableKey,
+          });
+        }
+
+        // ── One-time → create PaymentIntent ──────────────────────────────────
         const intent = await createPaymentIntent({
           amount:          data.amount,
           currency:        data.currency ?? 'usd',
           stripeAccountId: stripeAccount.stripeAccountId,
-          metadata: {
-            locationId,
-            entityId:         data.entityId,
-            entityType:       data.entityType,
-            ghlTransactionId,
-            ghlContactId:     data.contactId ?? null,
-            customerName,
-            customerEmail,
-            customerPhone,
-          },
+          metadata:        sharedMeta,
         });
 
-        // Save PI #1 to DB immediately so verify and Stripe webhook can resolve it
-        // GHL links its pending transaction to this PI ID. If checkout creates PI #2,
-        // the Stripe webhook looks up PI #1 by entityId and uses its ID for GHL notification.
+        // Save PI #1 to DB immediately so verify and Stripe webhook can resolve it by entityId
         try {
           await upsertPaymentEvent({
             locationId,
@@ -148,7 +215,7 @@ export async function POST(request) {
             customerEmail,
             customerPhone,
           });
-          console.log(`[GHL Webhook] PAYMENT_PROVIDER_CHARGE: saved PI #1 ${intent.id} for entityId=${data.entityId}`);
+          console.log(`[GHL Webhook] Saved PI #1 ${intent.id} for entityId=${data.entityId}`);
         } catch (dbErr) {
           console.warn('[GHL Webhook] Failed to pre-save PI #1 (non-fatal):', dbErr.message);
         }
