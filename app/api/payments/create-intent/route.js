@@ -35,6 +35,7 @@ import {
   createCustomer,
   createSubscription,
   createInlineSubscription,
+  updatePaymentIntentMetadata,
   getPrice,
 } from '@/lib/stripe';
 import { getStripeAccount, upsertPaymentEvent, getPriceSync } from '@/lib/tokenStore';
@@ -263,6 +264,18 @@ export async function POST(request) {
     const paymentIntent = subscription.latest_invoice?.payment_intent;
     if (!paymentIntent?.client_secret) {
       return NextResponse.json({ error: 'Subscription created but no payment required yet' }, { status: 422 });
+    }
+
+    // Stripe creates the invoice PI without our metadata — update it so the
+    // payment_intent.succeeded webhook can read ghlTransactionId, ghlSubscriptionId etc.
+    try {
+      await updatePaymentIntentMetadata(paymentIntent.id, {
+        ...sharedMeta,
+        entityType:        'subscription',
+        ghlSubscriptionId: ghlSubscriptionId ?? null,
+      }, stripeAccount.stripeAccountId);
+    } catch (metaErr) {
+      console.warn('[create-intent] Failed to update subscription PI metadata (non-fatal):', metaErr.message);
     }
 
     console.log(`[create-intent] inline subscription ${subscription.id} PI ${paymentIntent.id}`);
