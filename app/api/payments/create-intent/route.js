@@ -38,8 +38,9 @@ import {
   updatePaymentIntentMetadata,
   getPrice,
 } from '@/lib/stripe';
-import { getStripeAccount, upsertPaymentEvent, getPriceSync } from '@/lib/tokenStore';
+import { getStripeAccount, saveStripeAccount, upsertPaymentEvent, getPriceSync } from '@/lib/tokenStore';
 import { getTransaction } from '@/lib/ghl';
+import { getPrisma } from '@/lib/db';
 
 export async function POST(request) {
   let body;
@@ -100,7 +101,57 @@ export async function POST(request) {
     }
   }
 
-  const stripeAccount = await getStripeAccount(locationId);
+  let stripeAccount = await getStripeAccount(locationId);
+  console.log(`[create-intent] getStripeAccount(${locationId}):`, stripeAccount ? `found ${stripeAccount.stripeAccountId}` : 'null — attempting auto-connect');
+
+  if (!stripeAccount) {
+    // Auto-connect fallback: look up the org's stripeAccountId from the shared organizations table
+    try {
+      const db = await getPrisma();
+      const rows = await db.$queryRaw`
+        SELECT o.stripe_account_id
+        FROM organizations o
+        WHERE o.ghl_id = ${locationId}
+          AND o.stripe_account_id IS NOT NULL
+          AND o.stripe_account_id != ''
+        UNION
+        SELECT o.stripe_account_id
+        FROM organizations o
+        INNER JOIN ghl_accounts ga ON ga.organization_id = o.id
+        WHERE ga.ghl_location_id = ${locationId}
+          AND o.stripe_account_id IS NOT NULL
+          AND o.stripe_account_id != ''
+        LIMIT 1
+      `;
+      const stripeAccountId = rows?.[0]?.stripe_account_id ?? null;
+      console.log(`[create-intent] Auto-connect org lookup for ${locationId}: stripeAccountId=${stripeAccountId}`);
+
+      if (stripeAccountId) {
+        try {
+          await saveStripeAccount(locationId, {
+            stripeAccountId,
+            accessToken:    'direct',
+            refreshToken:   null,
+            publishableKey: process.env.STRIPE_PUBLISHABLE_KEY ?? '',
+            livemode:       true,
+            tokenType:      'direct',
+            scope:          null,
+          });
+          stripeAccount = await getStripeAccount(locationId);
+          console.log(`[create-intent] Auto-connected Stripe ${stripeAccountId} for location ${locationId}`);
+        } catch (saveErr) {
+          // P2002 = unique constraint (stripeAccountId already used by another location)
+          // P2003 = FK constraint (no ghlConnection row for this locationId)
+          console.error(`[create-intent] saveStripeAccount failed (code=${saveErr.code}):`, saveErr.message);
+        }
+      } else {
+        console.warn(`[create-intent] No org with stripeAccountId found for locationId=${locationId}`);
+      }
+    } catch (err) {
+      console.warn('[create-intent] Auto-connect fallback failed:', err.message);
+    }
+  }
+
   if (!stripeAccount) {
     return NextResponse.json(
       { error: 'This location has not connected a Stripe account yet' },
