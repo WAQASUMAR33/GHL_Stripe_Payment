@@ -60,9 +60,13 @@ export async function POST(request) {
     interval,
     isRecurring: isRecurringFlag,
     ghlSubscriptionId,
-    applicationFeeRate = 0,
+    applicationFeeRate: _applicationFeeRateFromRequest = 0,
     metadata = {},
   } = body;
+
+  // Enforce fixed 90/10 split: 10% goes to platform (payment processing + platform fee).
+  // This overrides whatever the caller sends so the split is always consistent.
+  const applicationFeeRate = 0.10;
 
   // Log full request body so we can see what GHL sends for recurring products
   console.log('[create-intent] body:', JSON.stringify({
@@ -295,12 +299,13 @@ export async function POST(request) {
     let subscription;
     try {
       subscription = await createInlineSubscription({
-        stripeAccountId: stripeAccount.stripeAccountId,
-        customerId:      customer.id,
+        stripeAccountId:      stripeAccount.stripeAccountId,
+        customerId:           customer.id,
         amount,
         currency,
-        interval:        resolvedInterval,
-        productName:     'Subscription',
+        interval:             resolvedInterval,
+        productName:          'Subscription',
+        applicationFeePercent: Math.round(applicationFeeRate * 100),
         metadata: {
           ...sharedMeta,
           entityType:        'subscription',
